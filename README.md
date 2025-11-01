@@ -21,7 +21,7 @@
 4. `pip install --upgrade pip`
 5. `pip install fastapi uvicorn[standard] python-dotenv pydantic pyyaml`
 
-- Um Backend zu starten, führe aus dem Ordner backend `uvicorn app:app --reload --port 8000` im Terminal aus
+- Um Backend zu starten, führe aus dem Ordner backend ` python -m uvicorn app:app --reload --port 8000 --host 0.0.0.0` im Terminal aus
 - health check: curl http://127.0.0.1:8000/health
 
 ## 4) Frontend Setup
