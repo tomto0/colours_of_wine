@@ -6,20 +6,37 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-# ---------- (optional) Gemini ----------
+# ---------------- Gemini (Google Generative AI) ----------------
 _GEMINI_AVAILABLE = False
+_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+_GEMINI_KEY_SET = bool(os.getenv("GOOGLE_API_KEY"))
+
 try:
     import google.generativeai as genai  # type: ignore
-    if os.getenv("GOOGLE_API_KEY"):
+    if _GEMINI_KEY_SET:
         genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
         _GEMINI_AVAILABLE = True
 except Exception:
     _GEMINI_AVAILABLE = False
 
-app = FastAPI(title="Colours of Wine API", version="0.3.1")
+# ---------------- DuckDuckGo Search (ddgs) ----------------
+_DDGS_AVAILABLE = False
+try:
+    import ddgs  # type: ignore
+    _DDGS_AVAILABLE = True
+except Exception:
+    _DDGS_AVAILABLE = False
+
+# ----------------------------------------------------------------
+
+app = FastAPI(title="Colours of Wine API", version="0.4.0")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"]
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 class AnalyzeRequest(BaseModel):
@@ -61,7 +78,7 @@ class AnalyzeResponse(BaseModel):
     notes: List[str] = []
     used_llm: bool = False
     reasoning: Optional[str] = None
-    # legacy für Frontend (wird dort nur für die Visualisierung genutzt)
+    # legacy Felder (für Visualisierung im Frontend weiterverwendet)
     color: Optional[ColorInfo] = None
     hex: Optional[str] = None
     rgb: Optional[List[int]] = None
@@ -94,16 +111,15 @@ def pick_color_heuristic(text: str) -> ColorInfo:
 
 # ---------------- DuckDuckGo Helper ----------------
 async def _ddg_text(query: str, region: str, max_results: int = 8) -> List[SourceItem]:
-    try:
-        from ddgs import DDGS  # type: ignore
-    except Exception:
+    if not _DDGS_AVAILABLE:
         print("[ddg] ddgs nicht installiert -> keine Quellen.")
         return []
+    from ddgs import DDGS  # type: ignore
     res: List[SourceItem] = []
     try:
-        with DDGS() as ddgs:
+        with DDGS() as ddg:
             print(f"[ddg] {region} :: {query}")
-            for r in ddgs.text(query, region=region, safesearch=DDG_SAFE, max_results=max_results):
+            for r in ddg.text(query, region=region, safesearch=DDG_SAFE, max_results=max_results):
                 title = r.get("title")
                 url = r.get("href") or r.get("url")
                 snippet = r.get("body")
@@ -114,11 +130,13 @@ async def _ddg_text(query: str, region: str, max_results: int = 8) -> List[Sourc
     return res
 
 def _dedup_sources(items: List[SourceItem]) -> List[SourceItem]:
-    seen = set(); out: List[SourceItem] = []
+    seen = set()
+    out: List[SourceItem] = []
     for s in items:
         key = (s.url or "").split("?")[0]
         if key and key not in seen:
-            seen.add(key); out.append(s)
+            seen.add(key)
+            out.append(s)
     return out
 
 # -------------- Property Extraction ----------------
@@ -136,7 +154,8 @@ SPARK_WORDS = ["sparkling","sekt","champagne","cava","prosecco","spumante","friz
 OAK_WORDS = ["oak","barrique","oak-aged","holzfass","eiche","eichenfass"]
 
 def _first_match(pat: str, text: str, flags=re.I) -> Optional[str]:
-    m = re.search(pat, text, flags); return m.group(1) if m else None
+    m = re.search(pat, text, flags)
+    return m.group(1) if m else None
 
 def extract_props(wine_name: str, sources: List[SourceItem]) -> WineProps:
     blob_parts = [wine_name] + [s.title or "" for s in sources] + [s.snippet or "" for s in sources]
@@ -150,54 +169,73 @@ def extract_props(wine_name: str, sources: List[SourceItem]) -> WineProps:
     if prod: props.producer = prod.strip()
 
     for c in COUNTRIES:
-        if re.search(r"\b"+re.escape(c)+r"\b", blob, re.I): props.country=c; break
+        if re.search(r"\b"+re.escape(c)+r"\b", blob, re.I):
+            props.country=c; break
     reg = _first_match(r"\b(Pfalz|Mosel|Wachau|Kamptal|Ahr|Nahe|Rheingau|Tuscany|Burgundy|Bordeaux|Rioja|Mendoza)\b", blob)
     if reg: props.region = reg
 
     for v, typ in VARIETIES:
         if re.search(r"\b"+re.escape(v)+r"\b", blob, re.I):
-            props.variety=v; props.wine_type={"white":"white","red":"red"}[typ]; props.grapes=[v]; break
-    if not props.wine_type and re.search(r"\bros[ée]\b", blob, re.I): props.wine_type="rosé"
+            props.variety=v
+            props.wine_type={"white":"white","red":"red"}[typ]
+            props.grapes=[v]
+            break
+    if not props.wine_type and re.search(r"\bros[ée]\b", blob, re.I):
+        props.wine_type="rosé"
 
     props.style = "sparkling" if any(re.search(r"\b"+w+r"\b", blob, re.I) for w in SPARK_WORDS) else "still"
-    if re.search(r"\b(port|sherry|madeira)\b", blob, re.I): props.style="fortified"
+    if re.search(r"\b(port|sherry|madeira)\b", blob, re.I):
+        props.style="fortified"
 
     for de,en in SWEET_WORDS:
-        if re.search(r"\b"+de+r"\b", blob, re.I): props.sweetness=en; break
+        if re.search(r"\b"+de+r"\b", blob, re.I):
+            props.sweetness=en; break
 
     alc = _first_match(r"(\d{1,2}[.,]\d)\s*%[ ]*vol", blob) or _first_match(r"(\d{1,2}[.,]\d)\s*%", blob)
     if alc:
         try: props.alcohol = float(alc.replace(",", "."))
         except: pass
 
-    if any(re.search(r"\b"+w+r"\b", blob, re.I) for w in OAK_WORDS): props.oak=True
+    if any(re.search(r"\b"+w+r"\b", blob, re.I) for w in OAK_WORDS):
+        props.oak=True
 
     tn = re.findall(r"\b(apple|pear|peach|citrus|lemon|lime|apricot|pineapple|herb|spice|vanilla|cherry|raspberry|strawberry|plum|pepper|smoke|mineral)\b", blob, re.I)
-    if tn: props.tasting_notes = sorted(set([t.lower() for t in tn]))
+    if tn:
+        props.tasting_notes = sorted(set([t.lower() for t in tn]))
     return props
 
 def _build_llm_prompt(wine_name: str, snippets: List[SourceItem]) -> str:
     lines = [
         "Extrahiere strukturierte Weineigenschaften als JSON:",
         '{"vintage": int|null, "wine_type": "red|white|rosé|sparkling"|null, "variety": str|null, "grapes":[str], "country": str|null, "region": str|null, "appellation": str|null, "producer": str|null, "style": str|null, "sweetness": str|null, "alcohol": float|null, "oak": bool|null, "tasting_notes":[str]}',
-        f"Wein: {wine_name}", "Snippets:"]
-    for s in snippets: lines.append(f"- {s.title or ''} — {s.snippet or ''}")
+        f"Wein: {wine_name}",
+        "Snippets:"
+    ]
+    for s in snippets:
+        lines.append(f"- {s.title or ''} — {s.snippet or ''}")
     return "\n".join(lines)
 
 def _parse_llm_json(text: str) -> Optional[Dict[str, Any]]:
-    try: return json.loads(text)
-    except: pass
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
     m = re.search(r"\{.*\}", text, re.S)
-    if not m: return None
-    try: return json.loads(m.group(0))
-    except:
-        try: return ast.literal_eval(m.group(0))
-        except: return None
+    if not m:
+        return None
+    try:
+        return json.loads(m.group(0))
+    except Exception:
+        try:
+            return ast.literal_eval(m.group(0))
+        except Exception:
+            return None
 
 async def run_gemini(prompt: str) -> Optional[Dict[str, Any]]:
-    if not _GEMINI_AVAILABLE: return None
+    if not _GEMINI_AVAILABLE:
+        return None
     try:
-        model = genai.GenerativeModel(os.getenv("GEMINI_MODEL", "gemini-1.5-flash"))  # type: ignore
+        model = genai.GenerativeModel(_GEMINI_MODEL)  # type: ignore
         resp = await model.generate_content_async(prompt)  # type: ignore
         if hasattr(resp, "text"):  # type: ignore
             return _parse_llm_json(resp.text)  # type: ignore
@@ -205,18 +243,28 @@ async def run_gemini(prompt: str) -> Optional[Dict[str, Any]]:
         print(f"[gemini] Fehler: {e}")
     return None
 
+# ---------------- Health ----------------
 @app.get("/health")
-def health(): return {"status": "ok"}
+def health():
+    return {
+        "status": "ok",
+        "llm_available": _GEMINI_AVAILABLE,
+        "gemini_model": _GEMINI_MODEL if _GEMINI_AVAILABLE else None,
+        "api_key_set": _GEMINI_KEY_SET,
+        "ddg_available": _DDGS_AVAILABLE,
+    }
 
+# ---------------- Analyze ----------------
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     wine = (req.wine_name or "").strip()
-    if not wine: raise HTTPException(status_code=400, detail="`wine_name` darf nicht leer sein.")
+    if not wine:
+        raise HTTPException(status_code=400, detail="`wine_name` darf nicht leer sein.")
 
-    # --- mehrstufige Suche ---
+    # mehrstufige Suche
     tried: List[str] = []
     regions = ["de-de", "us-en"]
-    query_candidates = [
+    queries = [
         f'"{wine}" site:vivino.com OR site:wine.com OR site:wikipedia.org',
         f'"{wine}"',
         wine,
@@ -224,10 +272,10 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     ]
 
     sources: List[SourceItem] = []
-    used_query = query_candidates[0]
+    used_query = queries[0]
     used_engine = "ddg:de-de"
 
-    for q in query_candidates:
+    for q in queries:
         for reg in regions:
             tried.append(f"{reg} :: {q}")
             res = await _ddg_text(q, reg, max_results=8)
@@ -236,16 +284,17 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
                 used_query = q
                 used_engine = f"ddg:{reg}"
                 break
-        if sources: break
+        if sources:
+            break
 
     notes: List[str] = []
     if not sources:
         notes.append("Keine Treffer von DDG (probiert: " + "; ".join(tried) + ").")
 
-    # Eigenschaften
+    # Heuristische Eigenschaften
     props = extract_props(wine, sources)
 
-    # optional: LLM-Verfeinerung
+    # Optional: LLM-Verfeinerung
     used_llm = False
     reasoning = None
     if _GEMINI_AVAILABLE and sources:
@@ -255,12 +304,19 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
                 merged = {**props.model_dump(), **llm}
                 props = WineProps(**merged)
                 used_llm = True
-                reasoning = "(LLM verfeinert)"
+                reasoning = f"LLM aktiv ({_GEMINI_MODEL})"
             except Exception as e:
                 notes.append(f"LLM-Parsing-Fehler: {e}")
 
+    # Farbe bleibt für Visualisierung als Legacy
     color = pick_color_heuristic(wine)
-    legacy_note = notes[0] if notes else "(Heuristik/Regeln; LLM evtl. inaktiv)"
+
+    # Legacy-„note“ fürs Frontend: dynamisch je nach LLM
+    legacy_note = (
+        f"LLM aktiv ({_GEMINI_MODEL})"
+        if used_llm
+        else (notes[0] if notes else "Heuristik/Regeln (ohne LLM)")
+    )
 
     return AnalyzeResponse(
         wine_name=wine,
