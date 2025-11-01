@@ -15,11 +15,11 @@
 - Im Terminal des Projekts `flutter doctor` ausführen, um sicherzustellen, dass alle Voraussetzungen erfüllt sind
 
 ## 3) Backend Setup
-cd backend
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install --upgrade pip
-pip install fastapi uvicorn[standard] python-dotenv pydantic pyyaml
+`cd backend`
+`py -3.12 -m venv .venv`
+`.\.venv\Scripts\Activate.ps1`
+`pip install --upgrade pip`
+`pip install fastapi uvicorn[standard] python-dotenv pydantic pyyaml`
 
 - Um Backend zu starten, führe aus dem Ordner backend `uvicorn app:app --reload --port 8000` im Terminal aus
 - health check: curl http://127.0.0.1:8000/health
