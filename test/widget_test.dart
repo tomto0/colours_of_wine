@@ -13,7 +13,7 @@ import 'package:colours_of_wine/main.dart';
 void main() {
   testWidgets('App lädt und zeigt Suchfeld und Analysieren-Button', (WidgetTester tester) async {
     // App aufbauen
-    await tester.pumpWidget(const WineVizApp());
+    await tester.pumpWidget(const ColoursOfWineApp());
     await tester.pumpAndSettle();
 
     // Erwartete Widgets prüfen
