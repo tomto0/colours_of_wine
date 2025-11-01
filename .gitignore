@@ -43,3 +43,22 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+# Python
+backend/.venv/
+backend/__pycache__/
+**/__pycache__/
+*.pyc
+
+# Flutter/Dart
+.dart_tool/
+.buildlog/
+.melos_tool/
+.packages
+**/build/
+# Xcode / iOS
+**/DerivedData/
+**/*.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+
+# OS / editor
+.DS_Store
+Thumbs.db
