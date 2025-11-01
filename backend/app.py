@@ -1,35 +1,122 @@
 # backend/app.py
 from __future__ import annotations
-import os, re, json, ast
+
+import os
+import re
+import json
+import ast
 from typing import List, Optional, Dict, Any, Tuple
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-# ---------------- Gemini (Google Generative AI) ----------------
-_GEMINI_AVAILABLE = False
-_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
-_GEMINI_KEY_SET = bool(os.getenv("GOOGLE_API_KEY"))
+# ======================= Gemini (Google Generative AI) =======================
 
+GEMINI_MODEL_ENV = os.getenv("GEMINI_MODEL", "").strip()
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "").strip()
+GEMINI_KEY_SET = bool(GOOGLE_API_KEY)
+
+# bevorzugte Modellreihenfolge; wird automatisch gewählt, wenn ENV leer/ungültig
+PREFERRED_MODELS = [
+    "gemini-1.5-flash-latest",
+    "gemini-1.5-pro-latest",
+    "gemini-1.5-flash-8b-latest",
+]
+
+# Bibliothek laden (optional)
+_genai = None
 try:
     import google.generativeai as genai  # type: ignore
-    if _GEMINI_KEY_SET:
-        genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
-        _GEMINI_AVAILABLE = True
-except Exception:
-    _GEMINI_AVAILABLE = False
 
-# ---------------- DuckDuckGo Search (ddgs) ----------------
+    _genai = genai
+    if GEMINI_KEY_SET:
+        _genai.configure(api_key=GOOGLE_API_KEY)
+except Exception:
+    _genai = None
+
+
+def build_gemini():
+    """
+    Liefert ein GenerativeModel, das generateContent unterstützt.
+    - Nutzt $GEMINI_MODEL falls gesetzt
+    - Sonst bevorzugte Reihenfolge
+    - Fällt auf irgendein verfügbares generateContent-Modell zurück
+    """
+    if not (_genai and GEMINI_KEY_SET):
+        return None, None  # (model, chosen_name)
+
+    try:
+        available = list(_genai.list_models())
+        # nur Modelle mit generateContent
+        available_gc = {
+            m.name
+            for m in available
+            if hasattr(m, "supported_generation_methods")
+               and "generateContent" in getattr(m, "supported_generation_methods", [])
+        }
+
+        # Kandidatenliste aufbauen (ENV zuerst, dann bevorzugte)
+        candidates: List[str] = []
+        if GEMINI_MODEL_ENV:
+            candidates.append(GEMINI_MODEL_ENV)
+        candidates.extend([m for m in PREFERRED_MODELS if m != GEMINI_MODEL_ENV])
+
+        # Voll-/Kurzname abgleichen (APIs liefern oft "models/<name>")
+        def is_available(name: str) -> Optional[str]:
+            if name in available_gc:
+                return name
+            short = f"models/{name}"
+            if short in available_gc:
+                return short
+            return None
+
+        for cand in candidates:
+            chosen = is_available(cand)
+            if chosen:
+                return _genai.GenerativeModel(chosen), chosen
+
+        # Fallback: irgendein GC-Modell
+        if available_gc:
+            chosen = sorted(available_gc)[0]
+            return _genai.GenerativeModel(chosen), chosen
+
+    except Exception as e:
+        print(f"[gemini] Fehler beim Listen/Wählen der Modelle: {e}")
+
+    return None, None
+
+
+async def run_gemini(prompt: str) -> Optional[Dict[str, Any]]:
+    """Führt generateContent asynchron aus und gibt geparstes JSON zurück."""
+    model, chosen = build_gemini()
+    if not model:
+        return None
+    try:
+        resp = await model.generate_content_async(prompt)  # type: ignore
+        text = getattr(resp, "text", None)
+        if not text:
+            return None
+        return _parse_llm_json(text)
+    except Exception as e:
+        print(f"[gemini] Fehler: {e}")
+        return None
+
+
+# ======================= DuckDuckGo Search (ddgs) =======================
+
 _DDGS_AVAILABLE = False
 try:
     import ddgs  # type: ignore
+
     _DDGS_AVAILABLE = True
 except Exception:
     _DDGS_AVAILABLE = False
 
-# ----------------------------------------------------------------
 
-app = FastAPI(title="Colours of Wine API", version="0.4.0")
+# =============================== FastAPI =====================================
+
+app = FastAPI(title="Colours of Wine API", version="0.6.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -39,22 +126,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# ============================== Models =======================================
+
 class AnalyzeRequest(BaseModel):
     wine_name: str = Field(..., description='z. B. "Riesling Bürklin-Wolf 2021"')
+
 
 class SourceItem(BaseModel):
     title: Optional[str] = None
     url: Optional[str] = None
     snippet: Optional[str] = None
 
+
 class ColorInfo(BaseModel):
     name: str
     hex: str
     rgb: Tuple[int, int, int]
 
+
 class WineProps(BaseModel):
     vintage: Optional[int] = None
-    wine_type: Optional[str] = None
+    wine_type: Optional[str] = None          # red | white | rosé | sparkling | fortified
     variety: Optional[str] = None
     grapes: List[str] = []
     country: Optional[str] = None
@@ -67,6 +160,7 @@ class WineProps(BaseModel):
     oak: Optional[bool] = None
     tasting_notes: List[str] = []
 
+
 class AnalyzeResponse(BaseModel):
     wine_name: str
     searched_query: str
@@ -78,11 +172,14 @@ class AnalyzeResponse(BaseModel):
     notes: List[str] = []
     used_llm: bool = False
     reasoning: Optional[str] = None
-    # legacy Felder (für Visualisierung im Frontend weiterverwendet)
+    # Legacy für Visualisierung im Frontend
     color: Optional[ColorInfo] = None
     hex: Optional[str] = None
     rgb: Optional[List[int]] = None
     note: Optional[str] = None
+
+
+# ============================== Heuristiken ==================================
 
 DDG_SAFE = os.getenv("DDG_SAFE", "moderate")
 
@@ -92,22 +189,29 @@ COLOR_TABLE = {
     "ruby": "#8B1A1A",
     "garnet": "#7B2D26",
 }
+
+
 def _rgb_from_hex(h: str) -> Tuple[int, int, int]:
     h = h.lstrip("#")
-    return (int(h[0:2],16), int(h[2:4],16), int(h[4:6],16))
+    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
 
 def pick_color_heuristic(text: str) -> ColorInfo:
     t = text.lower()
-    if any(k in t for k in ["riesling","grüner","sauvignon","pinot grigio","albari","vermentino"]):
+    if any(
+            k in t
+            for k in ["riesling", "grüner", "sauvignon", "pinot grigio", "albari", "vermentino"]
+    ):
         name = "pale straw"
     elif "rosé" in t or "rose" in t:
         name = "rosé"
-    elif any(k in t for k in ["nebbiolo","sangiovese","chianti"]):
+    elif any(k in t for k in ["nebbiolo", "sangiovese", "chianti"]):
         name = "garnet"
     else:
         name = "ruby"
     hx = COLOR_TABLE[name]
     return ColorInfo(name=name, hex=hx, rgb=_rgb_from_hex(hx))
+
 
 # ---------------- DuckDuckGo Helper ----------------
 async def _ddg_text(query: str, region: str, max_results: int = 8) -> List[SourceItem]:
@@ -115,6 +219,7 @@ async def _ddg_text(query: str, region: str, max_results: int = 8) -> List[Sourc
         print("[ddg] ddgs nicht installiert -> keine Quellen.")
         return []
     from ddgs import DDGS  # type: ignore
+
     res: List[SourceItem] = []
     try:
         with DDGS() as ddg:
@@ -129,6 +234,7 @@ async def _ddg_text(query: str, region: str, max_results: int = 8) -> List[Sourc
         print(f"[ddg] Fehler ({region}): {e}")
     return res
 
+
 def _dedup_sources(items: List[SourceItem]) -> List[SourceItem]:
     seen = set()
     out: List[SourceItem] = []
@@ -139,23 +245,58 @@ def _dedup_sources(items: List[SourceItem]) -> List[SourceItem]:
             out.append(s)
     return out
 
-# -------------- Property Extraction ----------------
-COUNTRIES = ["Austria","Germany","France","Italy","Spain","Portugal","USA","Australia","New Zealand","South Africa","Chile","Argentina"]
-VARIETIES = [
-    ("Riesling","white"),("Grüner Veltliner","white"),("Sauvignon Blanc","white"),
-    ("Chardonnay","white"),("Pinot Grigio","white"),("Gewürztraminer","white"),
-    ("Pinot Noir","red"),("Sangiovese","red"),("Nebbiolo","red"),
-    ("Cabernet Sauvignon","red"),("Merlot","red"),("Syrah","red"),
-    ("Zweigelt","red"),("Blaufränkisch","red"),("St. Laurent","red"),
+
+# -------------- Property Extraction (Heuristik) ----------------
+
+COUNTRIES = [
+    "Austria",
+    "Germany",
+    "France",
+    "Italy",
+    "Spain",
+    "Portugal",
+    "USA",
+    "Australia",
+    "New Zealand",
+    "South Africa",
+    "Chile",
+    "Argentina",
 ]
-SWEET_WORDS = [("trocken","dry"),("dry","dry"),("halbtrocken","off-dry"),("off-dry","off-dry"),
-               ("lieblich","medium-sweet"),("semi-sweet","medium-sweet"),("süß","sweet"),("sweet","sweet")]
-SPARK_WORDS = ["sparkling","sekt","champagne","cava","prosecco","spumante","frizzante"]
-OAK_WORDS = ["oak","barrique","oak-aged","holzfass","eiche","eichenfass"]
+VARIETIES = [
+    ("Riesling", "white"),
+    ("Grüner Veltliner", "white"),
+    ("Sauvignon Blanc", "white"),
+    ("Chardonnay", "white"),
+    ("Pinot Grigio", "white"),
+    ("Gewürztraminer", "white"),
+    ("Pinot Noir", "red"),
+    ("Sangiovese", "red"),
+    ("Nebbiolo", "red"),
+    ("Cabernet Sauvignon", "red"),
+    ("Merlot", "red"),
+    ("Syrah", "red"),
+    ("Zweigelt", "red"),
+    ("Blaufränkisch", "red"),
+    ("St. Laurent", "red"),
+]
+SWEET_WORDS = [
+    ("trocken", "dry"),
+    ("dry", "dry"),
+    ("halbtrocken", "off-dry"),
+    ("off-dry", "off-dry"),
+    ("lieblich", "medium-sweet"),
+    ("semi-sweet", "medium-sweet"),
+    ("süß", "sweet"),
+    ("sweet", "sweet"),
+]
+SPARK_WORDS = ["sparkling", "sekt", "champagne", "cava", "prosecco", "spumante", "frizzante"]
+OAK_WORDS = ["oak", "barrique", "oak-aged", "holzfass", "eiche", "eichenfass"]
+
 
 def _first_match(pat: str, text: str, flags=re.I) -> Optional[str]:
     m = re.search(pat, text, flags)
     return m.group(1) if m else None
+
 
 def extract_props(wine_name: str, sources: List[SourceItem]) -> WineProps:
     blob_parts = [wine_name] + [s.title or "" for s in sources] + [s.snippet or "" for s in sources]
@@ -163,57 +304,96 @@ def extract_props(wine_name: str, sources: List[SourceItem]) -> WineProps:
     props = WineProps()
 
     vin = _first_match(r"\b(19[6-9]\d|20[0-4]\d)\b", blob)
-    if vin: props.vintage = int(vin)
+    if vin:
+        props.vintage = int(vin)
 
-    prod = _first_match(r"(Weingut\s+[A-ZÄÖÜ][\w\-\s]+?|[A-ZÄÖÜ][\w\-]+(?:\s+[A-ZÄÖÜ][\w\-]+){0,3})\s+(Riesling|Chardonnay|Pinot|Sauvignon|Grüner|Blaufränkisch|Zweigelt|Sangiovese|Nebbiolo|Merlot|Cabernet)", blob)
-    if prod: props.producer = prod.strip()
+    prod = _first_match(
+        r"(Weingut\s+[A-ZÄÖÜ][\w\-\s]+?|[A-ZÄÖÜ][\w\-]+(?:\s+[A-ZÄÖÜ][\w\-]+){0,3})\s+("
+        r"Riesling|Chardonnay|Pinot|Sauvignon|Grüner|Blaufränkisch|Zweigelt|Sangiovese|"
+        r"Nebbiolo|Merlot|Cabernet)",
+        blob,
+    )
+    if prod:
+        props.producer = prod.strip()
 
     for c in COUNTRIES:
-        if re.search(r"\b"+re.escape(c)+r"\b", blob, re.I):
-            props.country=c; break
-    reg = _first_match(r"\b(Pfalz|Mosel|Wachau|Kamptal|Ahr|Nahe|Rheingau|Tuscany|Burgundy|Bordeaux|Rioja|Mendoza)\b", blob)
-    if reg: props.region = reg
+        if re.search(r"\b" + re.escape(c) + r"\b", blob, re.I):
+            props.country = c
+            break
+    reg = _first_match(
+        r"\b(Pfalz|Mosel|Wachau|Kamptal|Ahr|Nahe|Rheingau|Tuscany|Burgundy|Bordeaux|Rioja|Mendoza)\b",
+        blob,
+    )
+    if reg:
+        props.region = reg
 
     for v, typ in VARIETIES:
-        if re.search(r"\b"+re.escape(v)+r"\b", blob, re.I):
-            props.variety=v
-            props.wine_type={"white":"white","red":"red"}[typ]
-            props.grapes=[v]
+        if re.search(r"\b" + re.escape(v) + r"\b", blob, re.I):
+            props.variety = v
+            props.wine_type = {"white": "white", "red": "red"}[typ]
+            props.grapes = [v]
             break
     if not props.wine_type and re.search(r"\bros[ée]\b", blob, re.I):
-        props.wine_type="rosé"
+        props.wine_type = "rosé"
 
-    props.style = "sparkling" if any(re.search(r"\b"+w+r"\b", blob, re.I) for w in SPARK_WORDS) else "still"
+    props.style = "sparkling" if any(re.search(r"\b" + w + r"\b", blob, re.I) for w in SPARK_WORDS) else "still"
     if re.search(r"\b(port|sherry|madeira)\b", blob, re.I):
-        props.style="fortified"
+        props.style = "fortified"
 
-    for de,en in SWEET_WORDS:
-        if re.search(r"\b"+de+r"\b", blob, re.I):
-            props.sweetness=en; break
+    for de, en in SWEET_WORDS:
+        if re.search(r"\b" + de + r"\b", blob, re.I):
+            props.sweetness = en
+            break
 
     alc = _first_match(r"(\d{1,2}[.,]\d)\s*%[ ]*vol", blob) or _first_match(r"(\d{1,2}[.,]\d)\s*%", blob)
     if alc:
-        try: props.alcohol = float(alc.replace(",", "."))
-        except: pass
+        try:
+            props.alcohol = float(alc.replace(",", "."))
+        except Exception:
+            pass
 
-    if any(re.search(r"\b"+w+r"\b", blob, re.I) for w in OAK_WORDS):
-        props.oak=True
+    if any(re.search(r"\b" + w + r"\b", blob, re.I) for w in OAK_WORDS):
+        props.oak = True
 
-    tn = re.findall(r"\b(apple|pear|peach|citrus|lemon|lime|apricot|pineapple|herb|spice|vanilla|cherry|raspberry|strawberry|plum|pepper|smoke|mineral)\b", blob, re.I)
+    tn = re.findall(
+        r"\b(apple|pear|peach|citrus|lemon|lime|apricot|pineapple|herb|spice|vanilla|cherry|"
+        r"raspberry|strawberry|plum|pepper|smoke|mineral)\b",
+        blob,
+        re.I,
+    )
     if tn:
         props.tasting_notes = sorted(set([t.lower() for t in tn]))
     return props
 
+
+# ------------------------- LLM Prompts -------------------------
+
 def _build_llm_prompt(wine_name: str, snippets: List[SourceItem]) -> str:
     lines = [
         "Extrahiere strukturierte Weineigenschaften als JSON:",
-        '{"vintage": int|null, "wine_type": "red|white|rosé|sparkling"|null, "variety": str|null, "grapes":[str], "country": str|null, "region": str|null, "appellation": str|null, "producer": str|null, "style": str|null, "sweetness": str|null, "alcohol": float|null, "oak": bool|null, "tasting_notes":[str]}',
+        '{"vintage": int|null, "wine_type": "red|white|rosé|sparkling"|null, '
+        '"variety": str|null, "grapes":[str], "country": str|null, "region": str|null, '
+        '"appellation": str|null, "producer": str|null, "style": str|null, '
+        '"sweetness": str|null, "alcohol": float|null, "oak": bool|null, "tasting_notes":[str]}',
         f"Wein: {wine_name}",
-        "Snippets:"
+        "Snippets:",
     ]
     for s in snippets:
         lines.append(f"- {s.title or ''} — {s.snippet or ''}")
     return "\n".join(lines)
+
+
+def _build_llm_prompt_from_name(wine_name: str) -> str:
+    return (
+        "Du bist Wein-Experte. Leite typische Eigenschaften aus dem Weinnamen "
+        "und allgemeinem Weinwissen ab. Antworte **nur** als JSON im Format "
+        '{"vintage": int|null, "wine_type": "red|white|rosé|sparkling"|null, '
+        '"variety": str|null, "grapes":[str], "country": str|null, '
+        '"region": str|null, "appellation": str|null, "producer": str|null, '
+        '"style": str|null, "sweetness": str|null, "alcohol": float|null, '
+        f'"oak": bool|null, "tasting_notes":[str]}}. Wein: {wine_name}'
+    )
+
 
 def _parse_llm_json(text: str) -> Optional[Dict[str, Any]]:
     try:
@@ -231,44 +411,37 @@ def _parse_llm_json(text: str) -> Optional[Dict[str, Any]]:
         except Exception:
             return None
 
-async def run_gemini(prompt: str) -> Optional[Dict[str, Any]]:
-    if not _GEMINI_AVAILABLE:
-        return None
-    try:
-        model = genai.GenerativeModel(_GEMINI_MODEL)  # type: ignore
-        resp = await model.generate_content_async(prompt)  # type: ignore
-        if hasattr(resp, "text"):  # type: ignore
-            return _parse_llm_json(resp.text)  # type: ignore
-    except Exception as e:
-        print(f"[gemini] Fehler: {e}")
-    return None
 
-# ---------------- Health ----------------
+# =============================== Health ======================================
+
 @app.get("/health")
 def health():
+    model, chosen = build_gemini()
     return {
         "status": "ok",
-        "llm_available": _GEMINI_AVAILABLE,
-        "gemini_model": _GEMINI_MODEL if _GEMINI_AVAILABLE else None,
-        "api_key_set": _GEMINI_KEY_SET,
+        "llm_available": bool(model),
+        "gemini_model": chosen,
+        "api_key_set": GEMINI_KEY_SET,
         "ddg_available": _DDGS_AVAILABLE,
     }
 
-# ---------------- Analyze ----------------
+
+# ============================== Analyze ======================================
+
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     wine = (req.wine_name or "").strip()
     if not wine:
         raise HTTPException(status_code=400, detail="`wine_name` darf nicht leer sein.")
 
-    # mehrstufige Suche
+    # DuckDuckGo-Suche
     tried: List[str] = []
     regions = ["de-de", "us-en"]
     queries = [
-        f'"{wine}" site:vivino.com OR site:wine.com OR site:wikipedia.org',
         f'"{wine}"',
+        f'{wine} site:vivino.com OR site:wine.com OR site:wikipedia.org',
         wine,
-        f'{wine} wine',
+        f"{wine} wine",
     ]
 
     sources: List[SourceItem] = []
@@ -289,33 +462,32 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
 
     notes: List[str] = []
     if not sources:
-        notes.append("Keine Treffer von DDG (probiert: " + "; ".join(tried) + ").")
+        notes.append("Keine Web-Treffer; LLM nutzt allgemeines Weinwissen (educated guess).")
 
-    # Heuristische Eigenschaften
+    # Heuristische Grundeigenschaften
     props = extract_props(wine, sources)
 
-    # Optional: LLM-Verfeinerung
+    # --------- LLM-VERWENDUNG: IMMER, mit/ohne Quellen ---------
     used_llm = False
     reasoning = None
-    if _GEMINI_AVAILABLE and sources:
-        llm = await run_gemini(_build_llm_prompt(wine, sources))
-        if llm:
-            try:
-                merged = {**props.model_dump(), **llm}
-                props = WineProps(**merged)
-                used_llm = True
-                reasoning = f"LLM aktiv ({_GEMINI_MODEL})"
-            except Exception as e:
-                notes.append(f"LLM-Parsing-Fehler: {e}")
+    llm_json = await run_gemini(_build_llm_prompt(wine, sources) if sources else _build_llm_prompt_from_name(wine))
+    if llm_json:
+        try:
+            merged = {**props.model_dump(), **llm_json}
+            props = WineProps(**merged)
+            used_llm = True
+            reasoning = "LLM aktiv (Gemini) " + ("mit Quellen" if sources else "ohne Quellen")
+        except Exception as e:
+            notes.append(f"LLM-Parsing-Fehler: {e}")
+    else:
+        notes.append("LLM nicht verfügbar oder Antwort unbrauchbar – es bleiben Heuristiken.")
 
-    # Farbe bleibt für Visualisierung als Legacy
+    # Farbe für Visualisierung (Legacy)
     color = pick_color_heuristic(wine)
 
-    # Legacy-„note“ fürs Frontend: dynamisch je nach LLM
-    legacy_note = (
-        f"LLM aktiv ({_GEMINI_MODEL})"
-        if used_llm
-        else (notes[0] if notes else "Heuristik/Regeln (ohne LLM)")
+    # Legacy-„note“ fürs Frontend
+    legacy_note = f"LLM aktiv ({health().get('gemini_model')})" if used_llm else (
+        notes[0] if notes else "Heuristik/Regeln (ohne LLM)"
     )
 
     return AnalyzeResponse(

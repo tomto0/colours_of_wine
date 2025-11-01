@@ -1,12 +1,14 @@
+// lib/main.dart
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'widgets/wine_viz.dart'; // deine vorhandene Datei
+import 'widgets/wine_viz.dart';
 
 void main() => runApp(const ColoursOfWineApp());
 
 class ColoursOfWineApp extends StatelessWidget {
   const ColoursOfWineApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -29,27 +31,40 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final _controller = TextEditingController(text: 'Riesling Bürklin Otto Paus 2021');
-  bool _loading = false;
-
-  // API Daten
-  Map<String, dynamic>? _props;       // strukturierte Eigenschaften
-  List<Map<String, dynamic>> _sources = [];
-  String? _note;
-  String? _hexForViz;                 // nur für Visualisierung
-  String? _searchedQuery;
-
   final String _backend = 'http://127.0.0.1:8000';
 
-  Future<void> _analyze() async {
+  bool _loading = false;
+
+  // Ergebnisfelder
+  Map<String, dynamic>? _props; // strukturierte Eigenschaften
+  List<Map<String, dynamic>> _sources = [];
+  String? _note;                // kurze Note (z.B. “LLM aktiv …”)
+  List<String> _notes = [];     // längere Liste aus Backend
+  String? _hexForViz;           // HEX-Farbe für Visualisierung
+  String? _searchedQuery;       // tatsächlich verwendete Query
+  bool _usedLLM = false;
+
+  // ---------------- API Calls ----------------
+
+  Future<void> _callAnalyze({required bool useLLM}) async {
     final name = _controller.text.trim();
     if (name.isEmpty) return;
-    setState(() { _loading = true; _note = null; });
+
+    setState(() {
+      _loading = true;
+      _note = null;
+      _notes = [];
+    });
 
     try {
       final resp = await http.post(
         Uri.parse('$_backend/analyze'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'wine_name': name}),
+        body: jsonEncode({
+          'wine_name': name,
+          // Wird vom aktualisierten Backend ausgewertet; ältere Backends ignorieren es einfach.
+          'use_llm': useLLM,
+        }),
       );
 
       if (resp.statusCode == 200) {
@@ -57,6 +72,7 @@ class _HomePageState extends State<HomePage> {
 
         // Eigenschaften
         final props = (data['props'] as Map?)?.map((k, v) => MapEntry(k.toString(), v));
+
         // Quellen
         final src = <Map<String, dynamic>>[];
         if (data['sources'] is List) {
@@ -75,8 +91,12 @@ class _HomePageState extends State<HomePage> {
           _props = props?.cast<String, dynamic>();
           _sources = src;
           _note = (data['note'] ?? '').toString();
+          _notes = (data['notes'] is List)
+              ? (data['notes'] as List).map((e) => e.toString()).toList()
+              : <String>[];
           _hexForViz = (data['hex'] ?? '').toString().isNotEmpty ? data['hex'] : null;
           _searchedQuery = (data['searched_query'] ?? '').toString();
+          _usedLLM = (data['used_llm'] == true);
           _loading = false;
         });
       } else {
@@ -93,23 +113,24 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  // nur für Visualisierung
+  Future<void> _analyzeHeuristic() => _callAnalyze(useLLM: false);
+  Future<void> _analyzeWithLLM() => _callAnalyze(useLLM: true);
+
+  // ---------------- Visualisierung ----------------
+
   void _openViz() {
     if (_hexForViz == null) return;
+    final c = _colorFromHex(_hexForViz!);
     showDialog(
       context: context,
-      builder: (ctx) {
-        // aus Hex -> Color
-        final c = _colorFromHex(_hexForViz!);
-        return AlertDialog(
-          contentPadding: EdgeInsets.zero,
-          content: SizedBox(
-            width: 520,
-            height: 520,
-            child: WineViz(profile: WineProfile.fromBaseColor(c)),
-          ),
-        );
-      },
+      builder: (ctx) => AlertDialog(
+        contentPadding: EdgeInsets.zero,
+        content: SizedBox(
+          width: 520,
+          height: 520,
+          child: WineViz(profile: WineProfile.fromBaseColor(c)),
+        ),
+      ),
     );
   }
 
@@ -119,6 +140,8 @@ class _HomePageState extends State<HomePage> {
     if (h.length == 6) h = 'FF$h';
     return Color(int.parse(h, radix: 16));
   }
+
+  // ---------------- UI ----------------
 
   @override
   Widget build(BuildContext context) {
@@ -140,7 +163,7 @@ class _HomePageState extends State<HomePage> {
                 const SizedBox(height: 6),
                 TextField(
                   controller: _controller,
-                  onSubmitted: (_) => _analyze(),
+                  onSubmitted: (_) => _analyzeHeuristic(),
                   decoration: InputDecoration(
                     hintText: 'z. B. "Riesling Bürklin-Wolf 2021" …',
                     filled: true,
@@ -150,17 +173,25 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
                 const SizedBox(height: 14),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+
+                // --- Drei Buttons ---
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 8,
+                  alignment: WrapAlignment.center,
                   children: [
                     ElevatedButton.icon(
-                      onPressed: _loading ? null : _analyze,
-                      icon: const Icon(Icons.analytics),
+                      onPressed: _loading ? null : _analyzeHeuristic,
+                      icon: const Icon(Icons.analytics_outlined),
                       label: Text(_loading ? 'Analysiere…' : 'Analysieren'),
                     ),
-                    const SizedBox(width: 12),
                     ElevatedButton.icon(
-                      onPressed: canViz ? _openViz : null,
+                      onPressed: _loading ? null : _analyzeWithLLM,
+                      icon: const Icon(Icons.psychology_alt_outlined),
+                      label: const Text('Daten mittels LLM ergänzen'),
+                    ),
+                    ElevatedButton.icon(
+                      onPressed: canViz && !_loading ? _openViz : null,
                       icon: const Icon(Icons.bubble_chart_outlined),
                       label: const Text('Visualisierung generieren'),
                     ),
@@ -169,17 +200,23 @@ class _HomePageState extends State<HomePage> {
 
                 const SizedBox(height: 18),
 
-                // ---------------- Eigenschaften (statt Farbe!) ----------------
-                if (_props != null) _PropsCard(props: _props!, searchedQuery: _searchedQuery),
+                if (_props != null)
+                  _PropsCard(props: _props!, searchedQuery: _searchedQuery, usedLLM: _usedLLM),
 
                 const SizedBox(height: 16),
                 Text('Notizen:', style: Theme.of(context).textTheme.titleSmall),
                 const SizedBox(height: 4),
-                Text(
-                  (_note?.trim().isNotEmpty ?? false)
-                      ? _note!.trim()
-                      : '—',
-                ),
+                if ((_notes).isNotEmpty)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: _notes.map((n) => Text('• $n')).toList(),
+                  )
+                else
+                  Text(
+                    (_note?.trim().isNotEmpty ?? false)
+                        ? _note!.trim()
+                        : '—',
+                  ),
 
                 const SizedBox(height: 18),
                 Text('Quellen:', style: Theme.of(context).textTheme.titleSmall),
@@ -199,7 +236,12 @@ class _HomePageState extends State<HomePage> {
 class _PropsCard extends StatelessWidget {
   final Map<String, dynamic> props;
   final String? searchedQuery;
-  const _PropsCard({required this.props, this.searchedQuery});
+  final bool usedLLM;
+  const _PropsCard({
+    required this.props,
+    this.searchedQuery,
+    required this.usedLLM,
+  });
 
   String _fmt(dynamic v) {
     if (v == null) return '—';
@@ -233,10 +275,19 @@ class _PropsCard extends StatelessWidget {
         padding: const EdgeInsets.all(16.0),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('Eigenschaften', style: Theme.of(context).textTheme.titleMedium),
-          if (searchedQuery?.isNotEmpty == true) ...[
-            const SizedBox(height: 6),
-            Text('Such-Query: ${searchedQuery!}', style: Theme.of(context).textTheme.bodySmall),
-          ],
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              if (searchedQuery?.isNotEmpty == true)
+                Text('Such-Query: ${searchedQuery!}',
+                    style: Theme.of(context).textTheme.bodySmall),
+              const SizedBox(width: 12),
+              Chip(
+                label: Text(usedLLM ? 'LLM aktiv' : 'ohne LLM'),
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
+          ),
           const SizedBox(height: 12),
           Table(
             columnWidths: const {0: IntrinsicColumnWidth()},
@@ -286,11 +337,13 @@ class _SourceTile extends StatelessWidget {
           if (url.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 2.0),
-              child: Text(url,
-                  style: const TextStyle(
-                    color: Colors.blueAccent,
-                    decoration: TextDecoration.underline,
-                  )),
+              child: Text(
+                url,
+                style: const TextStyle(
+                  color: Colors.blueAccent,
+                  decoration: TextDecoration.underline,
+                ),
+              ),
             ),
         ],
       ),
