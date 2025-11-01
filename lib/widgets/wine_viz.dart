@@ -1,75 +1,207 @@
+// lib/widgets/wine_viz.dart
 import 'dart:math';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 
-/// Ein (optionales) Weinprofil. Werte 0..1.
-/// Falls du später echte Werte aus dem Backend bekommst, einfach hier befüllen.
+/// Weinprofil (alle Werte 0..1, außer baseColor).
+/// Reihenfolge der Ringe von außen nach innen:
+/// 0 Holzeinsatz/Ausbaustil
+/// 1 Farbe/Intensität
+/// 2 Mousseux/Perlage/Bubbles
+/// 3 Säure
+/// 4 Fruchtcharakter
+/// 5 Nicht-Frucht Komponenten
+/// 6 Körper/Balance/Textur/Struktur
+/// 7 Tannin
+/// 8 Reifearomen
+/// 9 Tiefe/Komplexität/Nachhall
+/// 10 Mineralik
+/// (Süße als separater Balken)
 class WineProfile {
-  final Color baseColor;      // „Farbe/Intensität“ – möglichst echte Weinfarbe
-  final double acidity;       // Säure (0..1) – steuert grünen Rand
-  final double body;          // Körper/Volumen (0..1) – verstärkt Sättigung
-  final double tannin;        // Tannin (0..1) – Ring-Textur
-  final double depth;         // Tiefe/Komplexität (0..1) – Abdunklung zur Mitte
-  final double sweetness;     // Süße (0..1) – seitlicher Balken
-  final double oak;           // Holzeinsatz (0..1) – warme Ecken
-  final bool bubbles;         // Perlage (Schaumwein)
-  final List<_AromaHint> nonFruit; // Nicht-Frucht-Komponenten (kleine Marker)
-  final List<_AromaHint> fruit;    // Fruchtcharakter (kleine Marker)
+  final Color baseColor;
+
+  final double oak;            // 0..1
+  final double colorIntensity; // 0..1
+  final bool   bubbles;        // Mousseux
+  final double acidity;        // 0..1
+  final double fruit;          // 0..1
+  final double nonFruit;       // 0..1
+  final double body;           // 0..1
+  final double tannin;         // 0..1
+  final double maturity;       // 0..1
+  final double depth;          // 0..1
+  final double minerality;     // 0..1
+  final double sweetness;      // 0..1 (separat)
 
   const WineProfile({
     required this.baseColor,
-    this.acidity = 0.4,
-    this.body = 0.4,
-    this.tannin = 0.2,
-    this.depth = 0.4,
-    this.sweetness = 0.0,
     this.oak = 0.0,
+    this.colorIntensity = 0.5,
     this.bubbles = false,
-    this.nonFruit = const [],
-    this.fruit = const [],
+    this.acidity = 0.4,
+    this.fruit = 0.4,
+    this.nonFruit = 0.3,
+    this.body = 0.45,
+    this.tannin = 0.25,
+    this.maturity = 0.2,
+    this.depth = 0.4,
+    this.minerality = 0.2,
+    this.sweetness = 0.1,
   });
 
-  /// Grobe Heuristik aus Basisfarbe:
-  /// - hell & gelbgrün => eher Weiß: hohe Säure, wenig Tannin/Body, wenig Oak
-  /// - rubin/rot & dunkler => eher Rot: mehr Tannin/Body/Tiefe, weniger Säure
+  /// Einfache Heuristik aus der Basisfarbe.
   factory WineProfile.fromBaseColor(Color c) {
     final hsl = HSLColor.fromColor(c);
-    final light = hsl.lightness; // 0..1
-    final hue = hsl.hue;         // 0..360
+    final light = hsl.lightness;
+    final hue = hsl.hue;
 
-    bool isWhite = light > 0.65 && (hue >= 40 && hue <= 120);   // gelbgrün–gelb
-    bool isRose  = light > 0.6 && (hue >= 330 || hue <= 30);    // rosa–lachs
-    bool isRed   = !isWhite && !isRose;
-
-    double acidity  = isWhite ? 0.75 : (isRose ? 0.55 : 0.35);
-    double body     = isRed   ? 0.65 : (isRose ? 0.45 : 0.35);
-    double tannin   = isRed   ? 0.55 : (isRose ? 0.25 : 0.05);
-    double depth    = isRed   ? 0.60 : (isRose ? 0.40 : 0.35);
-    double sweetness= 0.10; // default: trocken bis feinherb
-    double oak      = 0.10; // default: wenig Holz
+    final isWhite = light > .65 && (hue >= 40 && hue <= 120);
+    final isRose  = light > .60 && (hue >= 330 || hue <= 30);
+    final isRed   = !isWhite && !isRose;
 
     return WineProfile(
       baseColor: c,
+      acidity: isWhite ? .75 : (isRose ? .55 : .35),
+      body:    isRed   ? .65 : (isRose ? .45 : .35),
+      tannin:  isRed   ? .55 : (isRose ? .25 : .05),
+      depth:   isRed   ? .60 : (isRose ? .40 : .35),
+      colorIntensity: isRed ? .70 : .55,
+      fruit: isWhite ? .55 : .50,
+      nonFruit: isRed ? .40 : .25,
+      maturity: isRed ? .35 : .20,
+      minerality: isWhite ? .35 : .20,
+      sweetness: .10,
+      oak: .10,
+      bubbles: false,
+    );
+  }
+
+  /// NEU: aus Backend-`props` + optionalem HEX (Basisfarbe) ableiten.
+  /// Erwartete Keys (optional): wine_type, grapes(List), tasting_notes(List),
+  /// sweetness(String), oak(bool/num), acidity/fruit/nonFruit/body/tannin/
+  /// maturity/depth/minerality (num 0..1 oder 0..100), style(String), hex(String)
+  factory WineProfile.fromProps(Map<String, dynamic> props, {String? hex}) {
+    Color _colorFromHex(String h) {
+      var s = h.trim();
+      if (s.startsWith('#')) s = s.substring(1);
+      if (s.length == 6) s = 'FF$s';
+      return Color(int.parse(s, radix: 16));
+    }
+
+    double _norm(dynamic v, {double def = 0.0}) {
+      if (v == null) return def;
+      if (v is bool) return v ? 0.7 : 0.0;
+      if (v is num) {
+        var d = v.toDouble();
+        if (d > 1.0) d /= 100.0;
+        return d.clamp(0.0, 1.0);
+      }
+      return def;
+    }
+
+    // Basisfarbe
+    final Color base =
+    (hex != null && hex.isNotEmpty) ? _colorFromHex(hex) : const Color(0xFFF6F2AF);
+
+    final wineType = (props['wine_type'] ?? '').toString().toLowerCase();
+    final styleStr = (props['style'] ?? '').toString().toLowerCase();
+
+    final List<String> notes = (props['tasting_notes'] is List)
+        ? (props['tasting_notes'] as List).map((e) => e.toString().toLowerCase()).toList()
+        : const [];
+
+    final List<String> grapes = (props['grapes'] is List)
+        ? (props['grapes'] as List).map((e) => e.toString().toLowerCase()).toList()
+        : const [];
+
+    // Süße aus String-Kategorie
+    double sweetness = (() {
+      final s = (props['sweetness'] ?? '').toString().toLowerCase();
+      if (s.isEmpty) return 0.1;
+      if (s.contains('dry') || s.contains('trocken')) return 0.05;
+      if (s.contains('off')) return 0.20; // off-dry, halbtrocken
+      if (s.contains('medium')) return 0.45;
+      if (s.contains('semi')) return 0.60;
+      if (s.contains('sweet') || s.contains('süß')) return 0.90;
+      return 0.1;
+    })();
+
+    // Bubbles
+    final bubbles = styleStr.contains('spark');
+
+    // Oak direkt oder aus Noten ableiten
+    double oak = _norm(props['oak'], def: 0.0);
+    if (oak == 0.0 && notes.any((n) => n.contains('vanilla') || n.contains('toast') || n.contains('oak'))) {
+      oak = 0.6;
+    }
+
+    // Acidity ggf. aus Typ ableiten
+    double acidity = _norm(props['acidity'], def: 0.0);
+    if (acidity == 0.0) {
+      acidity = wineType == 'white' ? 0.70 : (wineType == 'rosé' ? 0.55 : 0.40);
+    }
+
+    // Körper, Tannin, Tiefe – einfache Heuristiken nach Typ/Rebsorte
+    double body   = _norm(props['body'], def: 0.0);
+    double tannin = _norm(props['tannin'], def: 0.0);
+    double depth  = _norm(props['depth'], def: 0.0);
+
+    if (body == 0.0)  body  = (wineType == 'red') ? 0.60 : (wineType == 'rosé' ? 0.45 : 0.35);
+    if (tannin == 0.0) {
+      final highTanGrapes = ['nebbiolo', 'sangiovese', 'cabernet', 'syrah'];
+      tannin = grapes.any((g) => highTanGrapes.any((h) => g.contains(h))) ? 0.65
+          : (wineType == 'red' ? 0.45 : (wineType == 'rosé' ? 0.20 : 0.05));
+    }
+    if (depth == 0.0) depth = (wineType == 'red') ? 0.55 : (wineType == 'rosé' ? 0.40 : 0.35);
+
+    // Frucht/Nicht-Frucht grob aus Noten
+    double fruit = _norm(props['fruit'], def: 0.0);
+    double nonFruit = _norm(props['nonFruit'], def: 0.0);
+    if (fruit == 0.0) {
+      final fruitWords = ['apple','pear','peach','citrus','lemon','lime','apricot',
+        'pineapple','cherry','raspberry','strawberry','plum','berry','tropical'];
+      fruit = notes.any((n) => fruitWords.any((w) => n.contains(w))) ? 0.6 : 0.4;
+    }
+    if (nonFruit == 0.0) {
+      final nfWords = ['spice','herb','pepper','smoke','earth','leather','tea','graphite'];
+      nonFruit = notes.any((n) => nfWords.any((w) => n.contains(w))) ? 0.45 : 0.25;
+    }
+
+    // Reife & Mineralik grob aus Noten
+    double maturity   = _norm(props['maturity'], def: 0.0);
+    double minerality = _norm(props['minerality'], def: 0.0);
+    if (maturity == 0.0 && notes.any((n) => n.contains('honey') || n.contains('nut') || n.contains('oxid'))) {
+      maturity = 0.5;
+    }
+    if (minerality == 0.0 && notes.any((n) => n.contains('mineral') || n.contains('slate') || n.contains('stone'))) {
+      minerality = 0.45;
+    }
+
+    // Farbintensität (Band 1)
+    double colorIntensity = _norm(props['color_intensity'], def: 0.0);
+    if (colorIntensity == 0.0) {
+      colorIntensity = (wineType == 'red') ? 0.70 : 0.55;
+    }
+
+    return WineProfile(
+      baseColor: base,
+      oak: oak,
+      colorIntensity: colorIntensity,
+      bubbles: bubbles,
       acidity: acidity,
+      fruit: fruit,
+      nonFruit: nonFruit,
       body: body,
       tannin: tannin,
+      maturity: maturity,
       depth: depth,
+      minerality: minerality,
       sweetness: sweetness,
-      oak: oak,
-      bubbles: false,
-      nonFruit: const [],
-      fruit: const [],
     );
   }
 }
 
-class _AromaHint {
-  final Offset polar; // r in [0..1], phi in rad
-  final Color color;
-  const _AromaHint(this.polar, this.color);
-}
-
-/// Haupt-Widget: zeichnet die Kreisvisualisierung im Quadrat.
+/// Haupt-Widget (Quadrat-Anmutung; Breite > Höhe erlaubt).
 class WineViz extends StatelessWidget {
   final WineProfile profile;
   final double padding;
@@ -85,9 +217,9 @@ class WineViz extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AspectRatio(
-      aspectRatio: 3 / 1.2, // breite Bühne; kannst du auf 1/1 ändern
+      aspectRatio: 3 / 1.2, // breite Bühne (kannst du auf 1/1 ändern)
       child: CustomPaint(
-        painter: _WinePainter(profile, cornerRadius: cornerRadius),
+        painter: _RingsPainter(profile, cornerRadius: cornerRadius),
         child: Padding(
           padding: EdgeInsets.only(right: max(8, padding / 2)),
           child: Align(
@@ -100,140 +232,187 @@ class WineViz extends StatelessWidget {
   }
 }
 
-class _WinePainter extends CustomPainter {
+/// Zeichnet die 11 Vollringe + Zentrum.
+class _RingsPainter extends CustomPainter {
   final WineProfile p;
   final double cornerRadius;
-  _WinePainter(this.p, {required this.cornerRadius});
+  _RingsPainter(this.p, {required this.cornerRadius});
 
   @override
   void paint(Canvas canvas, Size size) {
+    // Hintergrund
     final rect = Offset.zero & size;
-    final r = RRect.fromRectAndRadius(rect, Radius.circular(cornerRadius));
-
-    // Hintergrund (heller, neutral)
-    final bg = Paint()..color = const Color(0xFFF6EEF6);
-    canvas.drawRRect(r, bg);
-
-    // Zeichenfläche für den Kreis
-    final circleRect = Rect.fromLTWH(
-      12, 12, size.height - 24, size.height - 24,
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(rect, Radius.circular(cornerRadius)),
+      Paint()..color = const Color(0xFFF6EEF6),
     );
-    final cx = circleRect.center.dx;
-    final cy = circleRect.center.dy;
-    final radius = circleRect.width / 2;
 
-    // 1) Basisfarbe als konzentrischer Verlauf von Rand (heller) nach innen
-    //    Körper/Body erhöht Sättigung, Tiefe dunkelt Zentrum ab. (PDF: Farbe/Intensität & Tiefe). :contentReference[oaicite:1]{index=1}
-    final base = HSLColor.fromColor(p.baseColor);
-    Color ring(int i, int n, double darken) {
-      final t = i / (n - 1);
-      final satBoost = 0.15 * p.body;
-      final l = (base.lightness * (0.95 - 0.20 * t)).clamp(0.0, 1.0);
-      final s = (base.saturation + satBoost).clamp(0.0, 1.0);
-      final d = (t * p.depth * darken);
-      return base.withSaturation(s).withLightness(max(0.0, l - d)).toColor();
-    }
+    // Kreisfläche (etwas Rand lassen)
+    final inset = 14.0;
+    final circle = Rect.fromLTWH(
+      inset, inset, size.height - 2 * inset, size.height - 2 * inset,
+    );
+    final center = circle.center;
+    final outerR = circle.width / 2;
 
-    for (int i = 0; i < 14; i++) {
+    // Gleich dicke Bänder
+    const ringCount = 11; // ohne Süße
+    final ringGap = max(outerR * 0.005, 1.0); // dezente Gaps
+    final ringThickness = (outerR - ringGap * (ringCount - 1)) / ringCount;
+
+    // Hilfsfunktion: ein kompletter Kreisring
+    void ringStroke({
+      required double idx, // 0 = äußerster Ring
+      required Color color,
+      double opacity = 1.0,
+      double extraWidth = 0.0,
+      StrokeCap cap = StrokeCap.butt,
+      BlendMode? blend,
+      Shader? shader,
+    }) {
+      final r = outerR - idx * (ringThickness + ringGap) - ringThickness / 2;
       final paint = Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = radius / 14
-        ..color = ring(i, 14, 0.55);
-      canvas.drawCircle(Offset(cx, cy), radius - i * (radius / 14), paint);
+        ..strokeCap = cap
+        ..strokeWidth = ringThickness + extraWidth
+        ..color = color.withOpacity((color.opacity * opacity).clamp(0, 1));
+      if (blend != null) paint.blendMode = blend;
+      if (shader != null) paint.shader = shader;
+      canvas.drawCircle(center, r, paint);
     }
 
-    // 2) Säure: zartes grün-gelb am äußeren Rand (breiter bei hoher Säure). (PDF: Säure -> gelbgrün/grün Rand). :contentReference[oaicite:2]{index=2}
-    if (p.acidity > 0.02) {
-      final acidWidth = lerpDouble(4, radius * 0.20, p.acidity)!;
-      final acid = Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = acidWidth
-        ..shader = RadialGradient(
-          colors: [
-            const Color(0xFF8BC34A).withOpacity(0.30),
-            const Color(0xFFCDDC39).withOpacity(0.18),
-            Colors.transparent,
-          ],
-          stops: const [0.2, 0.6, 1.0],
-        ).createShader(circleRect.inflate(acidWidth));
-      canvas.drawCircle(Offset(cx, cy), radius, acid);
-    }
+    // 0) Holz außen
+    ringStroke(
+      idx: 0,
+      color: const Color(0xFFB07A3E),
+      opacity: 0.10 + 0.55 * p.oak,
+      blend: BlendMode.plus,
+    );
 
-    // 3) Tannin: feines „Gitter“ als Ring (haptische Textur). (PDF: Tannin -> Ring/Struktur). :contentReference[oaicite:3]{index=3}
-    if (p.tannin > 0.02) {
-      final ringW = lerpDouble(radius * 0.02, radius * 0.10, p.tannin)!;
-      final ringR = radius * (0.55 + 0.25 * p.tannin);
-      final grid = Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = ringW
-        ..color = Colors.black.withOpacity(0.07 + 0.18 * p.tannin);
-      canvas.drawCircle(Offset(cx, cy), ringR, grid);
+    // 1) Farbe/Intensität
+    final base = HSLColor.fromColor(p.baseColor);
+    final col1 = base
+        .withLightness((base.lightness - 0.10 * p.colorIntensity).clamp(0.0, 1))
+        .withSaturation((base.saturation + 0.18 * p.colorIntensity).clamp(0.0, 1))
+        .toColor();
+    ringStroke(idx: 1, color: col1, opacity: 0.95);
 
-      // leichte Kreuzschraffur:
-      final dash = max(2.0, ringW * 0.35);
-      for (double a = 0; a < 2 * pi; a += pi / 24) {
-        final sx = cx + ringR * cos(a);
-        final sy = cy + ringR * sin(a);
-        final ex = cx + (ringR - dash) * cos(a);
-        final ey = cy + (ringR - dash) * sin(a);
-        canvas.drawLine(Offset(sx, sy), Offset(ex, ey), grid);
-      }
-    }
-
-    // 4) Holzeinsatz: warme, goldbraune Ecken, von außen sanft einfallend. (PDF: Holzeinsatz über Ecken/Töne). :contentReference[oaicite:4]{index=4}
-    if (p.oak > 0.02) {
-      final oakPaint = Paint()
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 24);
-      final oakColor = const Color(0xFFB07A3E).withOpacity(0.12 + 0.30 * p.oak);
-      final s = min(size.height * 0.35, size.width * 0.25);
-      for (final corner in [
-        Offset(0, 0),
-        Offset(size.width - s, 0),
-        Offset(0, size.height - s),
-        Offset(size.width - s, size.height - s),
-      ]) {
-        oakPaint.color = oakColor;
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(Rect.fromLTWH(corner.dx, corner.dy, s, s),
-              Radius.circular(s * 0.25)),
-          oakPaint,
-        );
-      }
-    }
-
-    // 5) Perlage/Bubbles: kleine Kreise am Rand, steigen leicht nach oben. (PDF: Mousseux/Perlage). :contentReference[oaicite:5]{index=5}
+    // 2) Bubbles
     if (p.bubbles) {
-      final rnd = Random(42);
-      final bubbles = Paint()..color = Colors.white.withOpacity(0.7);
-      for (int i = 0; i < 60; i++) {
-        final a = -pi / 2 + rnd.nextDouble() * pi;      // linker/rechter Aufstieg
-        final rr = radius * (0.70 + rnd.nextDouble() * 0.28);
-        final o = Offset(cx + rr * cos(a), cy + rr * sin(a));
-        final rSmall = 1.5 + rnd.nextDouble() * 2.0;
-        canvas.drawCircle(o, rSmall, bubbles);
+      final r = outerR - 2 * (ringThickness + ringGap) - ringThickness / 2;
+      final paint = Paint()..color = Colors.white.withOpacity(.85);
+      final count = 48;
+      final rnd = Random(3);
+      for (var i = 0; i < count; i++) {
+        final a = -pi / 2 + i * (2 * pi / count) + (rnd.nextDouble() - .5) * 0.05;
+        final cx = center.dx + r * cos(a);
+        final cy = center.dy + r * sin(a);
+        final rr = lerpDouble(1.2, 2.6, rnd.nextDouble())!;
+        canvas.drawCircle(Offset(cx, cy), rr, paint);
+      }
+    } else {
+      ringStroke(idx: 2, color: Colors.white, opacity: .06, blend: BlendMode.screen);
+    }
+
+    // 3) Säure
+    final acidShader = SweepGradient(
+      colors: [
+        const Color(0xFF9CCC65).withOpacity(.22 + .25 * p.acidity),
+        const Color(0xFFDCE775).withOpacity(.18 + .20 * p.acidity),
+        const Color(0xFF9CCC65).withOpacity(.22 + .25 * p.acidity),
+      ],
+    ).createShader(circle);
+    ringStroke(idx: 3, color: const Color(0xFF9CCC65), opacity: 0.0, shader: acidShader);
+
+    // 4) Frucht
+    ringStroke(
+      idx: 4,
+      color: const Color(0xFFF6A623),
+      opacity: .12 + .55 * p.fruit,
+      blend: BlendMode.plus,
+    );
+
+    // 5) Nicht-Frucht
+    ringStroke(
+      idx: 5,
+      color: const Color(0xFF6D8E72),
+      opacity: .10 + .45 * p.nonFruit,
+      blend: BlendMode.plus,
+    );
+
+    // 6) Körper/Struktur
+    final bodyCol = base
+        .withSaturation((base.saturation + 0.25 * p.body).clamp(0.0, 1))
+        .withLightness((base.lightness - 0.05 * p.body).clamp(0.0, 1))
+        .toColor();
+    ringStroke(idx: 6, color: bodyCol, opacity: 0.9);
+
+    // 7) Tannin mit Schraffur
+    final tanCol = const Color(0xFF55433A).withOpacity(.12 + .45 * p.tannin);
+    ringStroke(idx: 7, color: tanCol, opacity: 1.0);
+    if (p.tannin > 0.02) {
+      final r = outerR - 7 * (ringThickness + ringGap) - ringThickness / 2;
+      final w = max(1.0, ringThickness * .08);
+      final hatch = Paint()
+        ..color = Colors.black.withOpacity(.06 + .18 * p.tannin)
+        ..strokeWidth = w;
+      for (double a = 0; a < 2 * pi; a += pi / 18) {
+        final sx = center.dx + (r + ringThickness * .48) * cos(a);
+        final sy = center.dy + (r + ringThickness * .48) * sin(a);
+        final ex = center.dx + (r - ringThickness * .48) * cos(a);
+        final ey = center.dy + (r - ringThickness * .48) * sin(a);
+        canvas.drawLine(Offset(sx, sy), Offset(ex, ey), hatch);
       }
     }
 
-    // 6) Aroma-Marker (Frucht / Nicht-Frucht) – optional farbige Punkte.
-    void drawHints(List<_AromaHint> hints) {
-      for (final h in hints) {
-        final rr = radius * h.polar.dx;
-        final a = h.polar.dy;
-        final o = Offset(cx + rr * cos(a), cy + rr * sin(a));
-        final paint = Paint()
-          ..color = h.color.withOpacity(0.85)
-          ..style = PaintingStyle.fill;
-        canvas.drawCircle(o, 4, paint);
-      }
+    // 8) Reife
+    ringStroke(
+      idx: 8,
+      color: const Color(0xFFBF8F5E),
+      opacity: .10 + .50 * p.maturity,
+      blend: BlendMode.plus,
+    );
+
+    // 9) Tiefe/Komplexität
+    ringStroke(
+      idx: 9,
+      color: Colors.black,
+      opacity: .08 + .30 * p.depth,
+      blend: BlendMode.multiply,
+    );
+
+    // 10) Mineralik
+    final minR = outerR - 10 * (ringThickness + ringGap) - ringThickness / 2;
+    final minPaint = Paint()
+      ..color = const Color(0xFF82B1FF).withOpacity(.20 + .40 * p.minerality);
+    final count = 28;
+    for (var i = 0; i < count; i++) {
+      final a = i * (2 * pi / count);
+      final rr = minR;
+      final o = Offset(center.dx + rr * cos(a), center.dy + rr * sin(a));
+      canvas.drawCircle(o, 1.8, minPaint);
     }
-    drawHints(p.fruit);
-    drawHints(p.nonFruit);
+
+    // Zentrum
+    final core = Paint()
+      ..shader = RadialGradient(
+        colors: [
+          base
+              .withLightness((base.lightness - .20 * p.depth).clamp(0.0, 1))
+              .withSaturation((base.saturation + .10 * p.body).clamp(0.0, 1))
+              .toColor(),
+          base.withLightness((base.lightness + .05).clamp(0.0, 1)).toColor(),
+        ],
+        stops: const [0.0, 1.0],
+      ).createShader(Rect.fromCircle(center: center, radius: ringThickness * 2.2));
+    canvas.drawCircle(center, ringThickness * 2.2, core);
   }
 
   @override
-  bool shouldRepaint(covariant _WinePainter old) => old.p != p;
+  bool shouldRepaint(covariant _RingsPainter old) => old.p != p;
 }
 
+/// Süßebalken (separat).
 class _SweetnessBar extends StatelessWidget {
   final double value; // 0..1
   const _SweetnessBar({required this.value});
@@ -244,9 +423,8 @@ class _SweetnessBar extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, bc) {
         final h = bc.maxHeight;
-        final w = 10.0;
         return CustomPaint(
-          size: Size(w, h),
+          size: Size(12, h),
           painter: _SweetnessPainter(v),
         );
       },
@@ -260,26 +438,20 @@ class _SweetnessPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final bg = Paint()..color = Colors.black.withOpacity(0.06);
-    final bar = Paint()
-      ..shader = const LinearGradient(
-        begin: Alignment.bottomCenter,
-        end: Alignment.topCenter,
-        colors: [Color(0xFFE91E63), Color(0xFFFFC0CB)],
-      ).createShader(Offset.zero & size);
-
+    final bg = Paint()..color = Colors.black.withOpacity(0.08);
     final rect = Offset.zero & size;
     canvas.drawRRect(
       RRect.fromRectAndRadius(rect, const Radius.circular(8)),
       bg,
     );
 
-    final fill = Rect.fromLTWH(
-      0,
-      size.height * (1 - v),
-      size.width,
-      size.height * v,
-    );
+    final fill = Rect.fromLTWH(0, size.height * (1 - v), size.width, size.height * v);
+    final bar = Paint()
+      ..shader = const LinearGradient(
+        begin: Alignment.bottomCenter,
+        end: Alignment.topCenter,
+        colors: [Color(0xFFE91E63), Color(0xFFFFC0CB)],
+      ).createShader(fill);
     canvas.drawRRect(
       RRect.fromRectAndRadius(fill, const Radius.circular(8)),
       bar,

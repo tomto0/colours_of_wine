@@ -36,12 +36,12 @@ class _HomePageState extends State<HomePage> {
   bool _loading = false;
 
   // Ergebnisfelder
-  Map<String, dynamic>? _props; // strukturierte Eigenschaften
+  Map<String, dynamic>? _props;         // strukturierte Eigenschaften (vom Backend)
   List<Map<String, dynamic>> _sources = [];
-  String? _note;                // kurze Note (z.B. “LLM aktiv …”)
-  List<String> _notes = [];     // längere Liste aus Backend
-  String? _hexForViz;           // HEX-Farbe für Visualisierung
-  String? _searchedQuery;       // tatsächlich verwendete Query
+  String? _note;                        // kurze Note (z. B. “LLM aktiv …”)
+  List<String> _notes = [];             // längere Liste aus Backend
+  String? _hexForViz;                   // HEX-Farbe für Visualisierung (fallback)
+  String? _searchedQuery;               // tatsächlich verwendete Web-Query
   bool _usedLLM = false;
 
   // ---------------- API Calls ----------------
@@ -62,7 +62,7 @@ class _HomePageState extends State<HomePage> {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'wine_name': name,
-          // Wird vom aktualisierten Backend ausgewertet; ältere Backends ignorieren es einfach.
+          // wird vom aktuellen Backend ausgewertet; ältere Backends ignorieren es
           'use_llm': useLLM,
         }),
       );
@@ -71,7 +71,7 @@ class _HomePageState extends State<HomePage> {
         final data = jsonDecode(resp.body) as Map<String, dynamic>;
 
         // Eigenschaften
-        final props = (data['props'] as Map?)?.map((k, v) => MapEntry(k.toString(), v));
+        final propsMap = (data['props'] as Map?)?.map((k, v) => MapEntry(k.toString(), v));
 
         // Quellen
         final src = <Map<String, dynamic>>[];
@@ -88,7 +88,7 @@ class _HomePageState extends State<HomePage> {
         }
 
         setState(() {
-          _props = props?.cast<String, dynamic>();
+          _props = propsMap?.cast<String, dynamic>();
           _sources = src;
           _note = (data['note'] ?? '').toString();
           _notes = (data['notes'] is List)
@@ -119,8 +119,17 @@ class _HomePageState extends State<HomePage> {
   // ---------------- Visualisierung ----------------
 
   void _openViz() {
-    if (_hexForViz == null) return;
-    final c = _colorFromHex(_hexForViz!);
+    // Visualisierung nutzt Props (bevorzugt) + optional fallbackHex
+    final prof = WineProfile.fromProps(_props ?? {}, hex: _hexForViz);
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        contentPadding: EdgeInsets.zero,
+        content: SizedBox(width: 520, height: 520, child: WineViz(profile: prof)),
+      ),
+    );
+
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -128,24 +137,18 @@ class _HomePageState extends State<HomePage> {
         content: SizedBox(
           width: 520,
           height: 520,
-          child: WineViz(profile: WineProfile.fromBaseColor(c)),
+          child: WineViz(profile: prof),
         ),
       ),
     );
-  }
-
-  Color _colorFromHex(String hex) {
-    var h = hex.trim();
-    if (h.startsWith('#')) h = h.substring(1);
-    if (h.length == 6) h = 'FF$h';
-    return Color(int.parse(h, radix: 16));
   }
 
   // ---------------- UI ----------------
 
   @override
   Widget build(BuildContext context) {
-    final canViz = _hexForViz != null;
+    // Visualisierung ist möglich, wenn entweder Props da sind oder zumindest eine HEX-Farbe
+    final canViz = (_props != null) || (_hexForViz != null);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF6EFF7),
@@ -201,12 +204,16 @@ class _HomePageState extends State<HomePage> {
                 const SizedBox(height: 18),
 
                 if (_props != null)
-                  _PropsCard(props: _props!, searchedQuery: _searchedQuery, usedLLM: _usedLLM),
+                  _PropsCard(
+                    props: _props!,
+                    searchedQuery: _searchedQuery,
+                    usedLLM: _usedLLM,
+                  ),
 
                 const SizedBox(height: 16),
                 Text('Notizen:', style: Theme.of(context).textTheme.titleSmall),
                 const SizedBox(height: 4),
-                if ((_notes).isNotEmpty)
+                if (_notes.isNotEmpty)
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: _notes.map((n) => Text('• $n')).toList(),
@@ -279,8 +286,11 @@ class _PropsCard extends StatelessWidget {
           Row(
             children: [
               if (searchedQuery?.isNotEmpty == true)
-                Text('Such-Query: ${searchedQuery!}',
-                    style: Theme.of(context).textTheme.bodySmall),
+                Expanded(
+                  child: Text('Such-Query: ${searchedQuery!}',
+                      style: Theme.of(context).textTheme.bodySmall,
+                      overflow: TextOverflow.ellipsis),
+                ),
               const SizedBox(width: 12),
               Chip(
                 label: Text(usedLLM ? 'LLM aktiv' : 'ohne LLM'),
