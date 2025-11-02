@@ -75,6 +75,7 @@ def build_gemini():
 
 
 def _parse_llm_json(text: str) -> Optional[Dict[str, Any]]:
+    """Versucht JSON auch dann zu parsen, wenn das Model Markdown o.ä. zurückgibt."""
     try:
         return json.loads(text)
     except Exception:
@@ -118,7 +119,7 @@ except Exception:
 
 # =============================== FastAPI =====================================
 
-app = FastAPI(title="Colours of Wine API", version="0.8.0")
+app = FastAPI(title="Colours of Wine API", version="0.9.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -132,13 +133,14 @@ app.add_middleware(
 
 class AnalyzeRequest(BaseModel):
     wine_name: str = Field(..., description='z. B. "Riesling Bürklin-Wolf 2021"')
-    use_llm: Optional[bool] = Field(default=None, description="Nur ergänzen, nichts überschreiben")
+    use_llm: Optional[bool] = Field(default=None, description="Aktiviere LLM-Anreicherung (nur fehlende Felder)")
 
 
 class SourceItem(BaseModel):
     title: Optional[str] = None
     url: Optional[str] = None
     snippet: Optional[str] = None
+    score: Optional[float] = None  # Relevanzscore
 
 
 class ColorInfo(BaseModel):
@@ -238,7 +240,34 @@ def pick_color_heuristic(text: str) -> ColorInfo:
     return ColorInfo(name=name, hex=hx, rgb=_rgb_from_hex(hx))
 
 
-async def _ddg_text(query: str, region: str, max_results: int = 8) -> List[SourceItem]:
+# ------------------------------ Suche ----------------------------------------
+
+# Bevorzugte Domains für Wein-spezifische Seiten
+PREFERRED_DOMAINS = [
+    "vivino.com", "wine.com", "winesearcher.com", "cellartracker.com",
+    "wein.plus", "falstaff.com", "weinfeder.de", "winelibrary.com",
+    "wikipedia.org", "weingueter.de", "weingut", "winery",
+]
+
+def _domain_priority(url: str) -> int:
+    for i, d in enumerate(PREFERRED_DOMAINS):
+        if d in (url or ""):
+            return len(PREFERRED_DOMAINS) - i
+    return 0
+
+def _normalize_name(name: str) -> Tuple[str, str, Optional[str]]:
+    """Gibt (voll, ohne Jahrgang, jahrgang) zurück."""
+    name = re.sub(r"\s+", " ", name).strip()
+    m = re.search(r"\b(19[6-9]\d|20[0-4]\d)\b", name)
+    vintage = m.group(1) if m else None
+    base = name
+    if vintage:
+        base = re.sub(re.escape(vintage), "", name).strip()
+    # unnötige Schlüsselwörter entfernen
+    base = re.sub(r"\b(wein|wine)\b", "", base, flags=re.I).strip()
+    return name, base, vintage
+
+async def _ddg_text(query: str, region: str, max_results: int = 12) -> List[SourceItem]:
     if not _DDGS_AVAILABLE:
         print("[ddg] ddgs nicht installiert -> keine Quellen.")
         return []
@@ -269,6 +298,31 @@ def _dedup_sources(items: List[SourceItem]) -> List[SourceItem]:
             out.append(s)
     return out
 
+def _score_source(s: SourceItem, base: str, vintage: Optional[str]) -> float:
+    t = f"{s.title or ''} {s.snippet or ''}".lower()
+    base_l = base.lower()
+    score = 0.0
+    if base_l and base_l in t:
+        score += 5.0
+    # token overlap
+    tokens = [w for w in re.split(r"[^\wäöüÄÖÜß]+", base_l) if w]
+    score += sum(0.8 for w in tokens if w in t)
+    if vintage and vintage in t:
+        score += 1.5
+    score += 0.3 * _domain_priority(s.url or "")
+    return score
+
+def _rank_and_filter(items: List[SourceItem], wine_name: str) -> List[SourceItem]:
+    full, base, vintage = _normalize_name(wine_name)
+    # Filter: mindestens Produzent/Sortenwort oder Vintage enthalten
+    filtered = []
+    for s in items:
+        txt = f"{s.title or ''} {s.snippet or ''}".lower()
+        if any(w for w in base.lower().split() if w and w in txt) or (vintage and vintage in txt):
+            s.score = _score_source(s, base, vintage)
+            filtered.append(s)
+    filtered.sort(key=lambda x: x.score or 0.0, reverse=True)
+    return filtered[:10]
 
 # -------------- Property Extraction (Heuristik) ----------------
 
@@ -343,7 +397,10 @@ def extract_props(wine_name: str, sources: List[SourceItem]) -> WineProps:
             props.sweetness = en
             break
 
-    alc = _first_match(r"(\d{1,2}[.,]\d)\s*%[ ]*vol", blob) or _first_match(r"(\d{1,2}[.,]\d)\s*%", blob)
+    # ABV/Alkohol (robust in mehreren Sprachen)
+    alc = _first_match(r"(\d{1,2}(?:[.,]\d)?)\s*%\s*(?:vol|abv)\b", blob) \
+          or _first_match(r"(?:alkohol|alc\.?|alcohol)\s*[:=]??\s*(\d{1,2}(?:[.,]\d)?)\s*%", blob) \
+          or _first_match(r"(\d{1,2}(?:[.,]\d)?)\s*%", blob)
     if alc:
         try:
             props.alcohol = float(alc.replace(",", "."))
@@ -369,6 +426,7 @@ def extract_props(wine_name: str, sources: List[SourceItem]) -> WineProps:
 def _build_llm_prompt_struct(wine_name: str, snippets: List[SourceItem]) -> str:
     lines = [
         "Extrahiere Eigenschaften UND ein Visualisierungsprofil als kompaktes JSON.",
+        "Wenn exakte Angaben fehlen (z.B. Alkohol %), gib einen **typischen** Wert für diesen Weintyp/Jahrgang an.",
         "Gib **nur** JSON zurück mit Feldern:",
         '{'
         '"props":{"vintage":int|null,"wine_type":"red|white|rosé|sparkling"|null,'
@@ -382,7 +440,7 @@ def _build_llm_prompt_struct(wine_name: str, snippets: List[SourceItem]) -> str:
         f'Wein: "{wine_name}"',
         "Snippets (nur zur Ableitung):"
     ]
-    for s in snippets:
+    for s in snippets[:6]:
         lines.append(f"- {s.title or ''} — {s.snippet or ''}")
     return "\n".join(lines)
 
@@ -390,6 +448,7 @@ def _build_llm_prompt_struct(wine_name: str, snippets: List[SourceItem]) -> str:
 def _build_llm_prompt_from_name(wine_name: str) -> str:
     return (
         "Leite typische Eigenschaften und ein Visualisierungsprofil ab. "
+        "Wenn exakte Angaben fehlen (z.B. Alkohol %), nutze plausible Standardwerte. "
         "Antworte **nur** als JSON mit Feldern 'props' und 'viz' wie oben. "
         f'Wein: "{wine_name}"'
     )
@@ -424,7 +483,6 @@ def _merge_props_non_destructive(base: WineProps, llm_props: Dict[str, Any]) -> 
 
     for k, v in llm_props.items():
         if k in ("grapes", "tasting_notes"):
-            # Vereinigen (ohne Duplikate)
             base_list = merged.get(k) or []
             if isinstance(v, list):
                 merged[k] = sorted({*(str(x) for x in base_list), *(str(x) for x in v)})
@@ -433,10 +491,9 @@ def _merge_props_non_destructive(base: WineProps, llm_props: Dict[str, Any]) -> 
             continue
 
         cur = merged.get(k, None)
-        # numerisch/bool: nur setzen, wenn bisher None
-        if isinstance(cur, (int, float)) or isinstance(cur, bool):
-            if cur is None and v is not None:
-                merged[k] = v
+        # numerisch/bool oder None: nur setzen, wenn aktuell nicht belegt
+        if cur is None and v is not None:
+            merged[k] = v
             continue
 
         # strings/sonstiges: nur wenn leer/fehlend
@@ -453,35 +510,47 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     if not wine:
         raise HTTPException(status_code=400, detail="`wine_name` darf nicht leer sein.")
 
-    # DDG-Suche
+    full, base, vintage = _normalize_name(wine)
+
+    # DDG-Suche – mehrere, gezielt fokussierte Queries
     tried: List[str] = []
     regions = ["de-de", "us-en"]
     queries = [
-        f'"{wine}"',
-        f'{wine} site:vivino.com OR site:wine.com OR site:wikipedia.org',
-        wine,
-        f"{wine} wine",
+        f'"{full}"',
+        f'"{base}" {vintage or ""} site:vivino.com OR site:winesearcher.com OR site:wine.com',
+        f'{base} {vintage or ""} site:wikipedia.org OR site:falstaff.com OR site:wein.plus',
+        f'{full} wine',
+        full,
     ]
 
     sources: List[SourceItem] = []
     used_query = queries[0]
     used_engine = "ddg:de-de"
 
+    raw: List[SourceItem] = []
     for q in queries:
         for reg in regions:
             tried.append(f"{reg} :: {q}")
-            res = await _ddg_text(q, reg, max_results=8)
+            res = await _ddg_text(q, reg, max_results=12)
             if res:
-                sources = _dedup_sources(res)
-                used_query = q
-                used_engine = f"ddg:{reg}"
-                break
-        if sources:
+                raw.extend(res)
+        if raw:
             break
+
+    # Deduplizieren, dann ranken
+    if raw:
+        raw = _dedup_sources(raw)
+        ranked = _rank_and_filter(raw, wine)
+        sources = ranked
+        used_query = queries[0]
+        used_engine = "ddg+rank"
+    else:
+        sources = []
+        used_engine = "ddg:none"
 
     notes: List[str] = []
     if not sources:
-        notes.append("Keine Web-Treffer – Analyse basiert auf Heuristik.")
+        notes.append("Keine passenden Weintreffer – Analyse basiert auf Heuristik.")
 
     # Heuristische Grundeigenschaften
     props = extract_props(wine, sources)
@@ -509,7 +578,7 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
                 viz_profile = vp
 
                 used_llm = True
-                reasoning = "LLM hat fehlende Felder ergänzt (ohne Überschreiben)."
+                reasoning = "LLM hat fehlende Felder ergänzt (inkl. plausibler ABV-Schätzung) – nichts überschrieben."
             except Exception as e:
                 notes.append(f"LLM-Parsing-Fehler: {e}")
         else:
