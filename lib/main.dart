@@ -64,7 +64,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   // längerer Example-Text ist egal – Feld wird jetzt sehr breit dargestellt
   final TextEditingController _controller =
-  TextEditingController(text: 'LES MOUGEOTTES PINOT NOIR 2024');
+  TextEditingController(text: 'DR. BÜRKLIN-WOLF RIESLING VDP.GUTSWEIN TROCKEN 2024');
 
   // 👉 ggf. anpassen
   final String _backend = 'http://127.0.0.1:8000';
@@ -258,7 +258,7 @@ class _HomePageState extends State<HomePage> {
                                 textInputAction: TextInputAction.search,
                                 onSubmitted: (_) => _analyzeHeuristic(),
                                 decoration: const InputDecoration(
-                                  hintText: 'LES MOUGEOTTES PINOT NOIR 2024',
+                                  hintText: 'DR. BÜRKLIN-WOLF RIESLING VDP.GUTSWEIN TROCKEN 2021',
                                 ),
                               ),
                             ),
