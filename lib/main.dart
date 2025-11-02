@@ -10,7 +10,7 @@ class ColoursOfWineApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const seed = Color(0xFF6D5E9E); // eleganter, leicht violetter Akzent
+    const seed = Color(0xFF6D5E9E);
     return MaterialApp(
       title: 'Colours of Wine',
       debugShowCheckedModeBanner: false,
@@ -20,10 +20,10 @@ class ColoursOfWineApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(
           seedColor: seed,
           brightness: Brightness.light,
-          background: const Color(0xFFF3EFE6), // „paper“-ton passend zum Logo
+          background: const Color(0xFFF3EFE6),
         ),
         textTheme: const TextTheme(
-          headlineMedium: TextStyle(fontWeight: FontWeight.w600, letterSpacing: -0.3),
+          headlineMedium: TextStyle(fontWeight: FontWeight.w700, letterSpacing: -0.2),
           titleMedium: TextStyle(fontWeight: FontWeight.w600),
           labelLarge: TextStyle(fontWeight: FontWeight.w500),
         ),
@@ -31,7 +31,7 @@ class ColoursOfWineApp extends StatelessWidget {
           filled: true,
           fillColor: Colors.white,
           hintStyle: TextStyle(color: Colors.black.withOpacity(0.45)),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
             borderSide: BorderSide(color: Colors.black.withOpacity(0.08)),
@@ -45,11 +45,9 @@ class ColoursOfWineApp extends StatelessWidget {
             borderSide: BorderSide(color: seed, width: 1.4),
           ),
         ),
-        cardTheme: CardThemeData(
+        cardTheme: const CardThemeData(
           elevation: 0,
-          color: Colors.white.withOpacity(0.75),
           surfaceTintColor: Colors.transparent,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
         ),
       ),
       home: const HomePage(),
@@ -64,17 +62,17 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  // längerer Example-Text ist egal – Feld wird jetzt sehr breit dargestellt
   final TextEditingController _controller =
   TextEditingController(text: 'LES MOUGEOTTES PINOT NOIR 2024');
 
-  // 👉 Backend-Adresse ggf. anpassen
+  // 👉 ggf. anpassen
   final String _backend = 'http://127.0.0.1:8000';
 
   bool _loading = false;
 
-  // Ergebnisfelder
-  Map<String, dynamic>? _props; // strukturierte Eigenschaften
-  Map<String, dynamic>? _viz; // LLM-Viz-Profil
+  Map<String, dynamic>? _props;
+  Map<String, dynamic>? _viz;
   List<Map<String, dynamic>> _sources = [];
   String? _note;
   List<String> _notes = [];
@@ -85,7 +83,6 @@ class _HomePageState extends State<HomePage> {
   Future<void> _callAnalyze({required bool useLLM}) async {
     final name = _controller.text.trim();
     if (name.isEmpty) return;
-
     setState(() {
       _loading = true;
       _note = null;
@@ -169,8 +166,8 @@ class _HomePageState extends State<HomePage> {
         insetPadding: const EdgeInsets.all(24),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         child: SizedBox(
-          width: 620,
-          height: 620,
+          width: 680,
+          height: 680,
           child: ClipRRect(
             borderRadius: BorderRadius.circular(24),
             child: WineViz(profile: profile),
@@ -190,6 +187,9 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+
+    // breitere Arbeitsfläche für Web/Desktop
+    final double maxWidth = 1200;
 
     return Scaffold(
       backgroundColor: theme.colorScheme.background,
@@ -215,104 +215,93 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
 
-            // Inhalt
             Center(
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 980),
+                constraints: BoxConstraints(maxWidth: maxWidth),
                 child: ListView(
                   padding:
-                  const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+                  const EdgeInsets.symmetric(horizontal: 24, vertical: 22),
                   children: [
-                    // Header mit Logo
+                    // Header mit größerem Logo
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: Image.asset(
-                            'assets/logo.png', // <— hier dein Logo
-                            key: UniqueKey(),
-                            width: 56,
-                            height: 56,
-                          ),
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Colours of Wine',
-                                  style: theme.textTheme.headlineMedium!
-                                      .copyWith(
-                                      letterSpacing: 0.2,
-                                      fontWeight: FontWeight.w700)),
-                            ],
-                          ),
+                        // Logo größer & nicht beschnitten
+                        Image.asset(
+                          'assets/logo.png',
+                          width: 200,
+                          height: 200,
+                          filterQuality: FilterQuality.high,
                         ),
                       ],
                     ),
                     const SizedBox(height: 18),
 
-                    // Eingabekarte
+                    // Eingabe-Karte: breite Suchleiste, Buttons darunter
                     Card(
                       margin: EdgeInsets.zero,
                       child: Padding(
-                        padding: const EdgeInsets.all(18.0),
+                        padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text('Weinname (z. B. „Tignanello 2021“)',
                                 style: theme.textTheme.labelLarge),
-                            const SizedBox(height: 8),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: TextField(
-                                    controller: _controller,
-                                    textInputAction: TextInputAction.search,
-                                    onSubmitted: (_) => _analyzeHeuristic(),
-                                    decoration: const InputDecoration(
-                                      hintText:
-                                      'LES MOUGEOTTES PINOT NOIR 2024',
-                                    ),
-                                  ),
+                            const SizedBox(height: 10),
+
+                            // sehr breite Suchleiste
+                            SizedBox(
+                              width: double.infinity, // nimmt volle Breite der Karte
+                              child: TextField(
+                                controller: _controller,
+                                textInputAction: TextInputAction.search,
+                                onSubmitted: (_) => _analyzeHeuristic(),
+                                decoration: const InputDecoration(
+                                  hintText: 'LES MOUGEOTTES PINOT NOIR 2024',
                                 ),
-                                const SizedBox(width: 12),
+                              ),
+                            ),
+
+                            const SizedBox(height: 14),
+
+                            // Buttons drunter in Wrap (responsive)
+                            Wrap(
+                              spacing: 10,
+                              runSpacing: 10,
+                              children: [
                                 FilledButton.icon(
                                   onPressed: _loading ? null : _analyzeHeuristic,
                                   icon: const Icon(Icons.analytics_outlined),
                                   label: const Text('Analysieren'),
                                 ),
-                                const SizedBox(width: 8),
                                 FilledButton.tonalIcon(
                                   onPressed: _loading ? null : _analyzeWithLLM,
                                   icon: const Icon(Icons.auto_fix_high_outlined),
                                   label: const Text('Daten mittels LLM ergänzen'),
                                 ),
-                                const SizedBox(width: 8),
                                 OutlinedButton.icon(
                                   onPressed:
                                   (_viz != null || _hexForViz != null)
                                       ? _openViz
                                       : null,
-                                  icon:
-                                  const Icon(Icons.auto_graph_outlined),
-                                  label:
-                                  const Text('Visualisierung generieren'),
+                                  icon: const Icon(Icons.auto_graph_outlined),
+                                  label: const Text('Visualisierung generieren'),
                                 ),
                               ],
                             ),
+
                             if (_loading) ...[
-                              const SizedBox(height: 12),
+                              const SizedBox(height: 14),
                               const LinearProgressIndicator(minHeight: 3),
                             ],
                           ],
                         ),
                       ),
                     ),
-                    const SizedBox(height: 16),
 
-                    // Ergebnisse
+                    const SizedBox(height: 18),
+
                     if (_props != null || _note != null)
                       _ResultCard(
                         props: _props,
@@ -356,16 +345,15 @@ class _ResultCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final hasProps = props != null && props!.isNotEmpty;
 
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+        padding: const EdgeInsets.fromLTRB(22, 18, 22, 22),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Titelzeile
+            // Kopfzeile
             Row(
               children: [
                 Text('Eigenschaften', style: theme.textTheme.titleMedium),
@@ -465,7 +453,7 @@ class _ResultCard extends StatelessWidget {
   Widget _row(String left, String right) {
     final isEmpty = right.isEmpty;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
       decoration: BoxDecoration(
         color: Colors.black.withOpacity(0.02),
         border: Border(
@@ -475,12 +463,12 @@ class _ResultCard extends StatelessWidget {
       child: Row(
         children: [
           SizedBox(
-            width: 140,
+            width: 160, // etwas breiter, damit „Appellation“ etc. sauber umbrechen
             child: Text(left,
                 style:
                 const TextStyle(fontWeight: FontWeight.w600, height: 1.2)),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           Expanded(child: Text(isEmpty ? '—' : right)),
         ],
       ),
