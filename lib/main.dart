@@ -62,11 +62,10 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  // längerer Example-Text ist egal – Feld wird jetzt sehr breit dargestellt
+  // TODO: delete this controller when done testing (this just prints the value so that it's not necessary to write sth everytime)
   final TextEditingController _controller =
   TextEditingController(text: 'DR. BÜRKLIN-WOLF RIESLING VDP.GUTSWEIN TROCKEN 2024');
 
-  // 👉 ggf. anpassen
   final String _backend = 'http://127.0.0.1:8000';
 
   bool _loading = false;
@@ -188,7 +187,6 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    // breitere Arbeitsfläche für Web/Desktop
     final double maxWidth = 1200;
 
     return Scaffold(
@@ -196,7 +194,6 @@ class _HomePageState extends State<HomePage> {
       body: SafeArea(
         child: Stack(
           children: [
-            // zarter Hintergrund-Gradient
             Positioned.fill(
               child: IgnorePointer(
                 child: DecoratedBox(
@@ -238,7 +235,7 @@ class _HomePageState extends State<HomePage> {
                     ),
                     const SizedBox(height: 18),
 
-                    // Eingabe-Karte: breite Suchleiste, Buttons darunter
+                    // Eingabe-Karte
                     Card(
                       margin: EdgeInsets.zero,
                       child: Padding(
@@ -250,7 +247,7 @@ class _HomePageState extends State<HomePage> {
                                 style: theme.textTheme.labelLarge),
                             const SizedBox(height: 10),
 
-                            // sehr breite Suchleiste
+                            // Suchleiste
                             SizedBox(
                               width: double.infinity, // nimmt volle Breite der Karte
                               child: TextField(
@@ -463,7 +460,7 @@ class _ResultCard extends StatelessWidget {
       child: Row(
         children: [
           SizedBox(
-            width: 160, // etwas breiter, damit „Appellation“ etc. sauber umbrechen
+            width: 160,
             child: Text(left,
                 style:
                 const TextStyle(fontWeight: FontWeight.w600, height: 1.2)),
