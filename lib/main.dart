@@ -62,7 +62,7 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  // TODO: delete this controller when done testing (this just prints the value so that it's not necessary to write sth everytime)
+  // TODO: delete this controller when done testing
   final TextEditingController _controller =
   TextEditingController(text: 'DR. BÜRKLIN-WOLF RIESLING VDP.GUTSWEIN TROCKEN 2024');
 
@@ -79,6 +79,10 @@ class _HomePageState extends State<HomePage> {
   String? _searchedQuery;
   bool _usedLLM = false;
 
+  // Neu: Kritiker-Summaries + Gesamtsummary
+  List<Map<String, dynamic>> _criticSummaries = [];
+  String? _combinedSummary;
+
   Future<void> _callAnalyze({required bool useLLM}) async {
     final name = _controller.text.trim();
     if (name.isEmpty) return;
@@ -86,6 +90,8 @@ class _HomePageState extends State<HomePage> {
       _loading = true;
       _note = null;
       _notes = [];
+      _criticSummaries = [];
+      _combinedSummary = null;
     });
 
     try {
@@ -117,10 +123,30 @@ class _HomePageState extends State<HomePage> {
           }
         }
 
+        // Neu: critic_summaries + combined_summary aus Backend ziehen
+        final critic = <Map<String, dynamic>>[];
+        if (data['critic_summaries'] is List) {
+          for (final c in (data['critic_summaries'] as List)) {
+            if (c is Map) {
+              critic.add({
+                'source_label': (c['source_label'] ?? '').toString(),
+                'source_id': (c['source_id'] ?? '').toString(),
+                'summary': (c['summary'] ?? '').toString(),
+                'url': (c['url'] ?? '').toString(),
+              });
+            }
+          }
+        }
+
+        final combinedSummary = (data['combined_summary'] ?? '').toString();
+        final hasCombined = combinedSummary.trim().isNotEmpty;
+
         setState(() {
           _props = props ?? {};
           _viz = viz ?? {};
           _sources = src;
+          _criticSummaries = critic;
+          _combinedSummary = hasCombined ? combinedSummary : null;
           _hexForViz = (data['hex'] ?? '').toString();
           _note = (data['note'] ?? '').toString();
           _notes = (data['notes'] is List)
@@ -224,7 +250,6 @@ class _HomePageState extends State<HomePage> {
                       crossAxisAlignment: CrossAxisAlignment.center,
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        // Logo größer & nicht beschnitten
                         Image.asset(
                           'assets/logo.png',
                           width: 200,
@@ -247,22 +272,21 @@ class _HomePageState extends State<HomePage> {
                                 style: theme.textTheme.labelLarge),
                             const SizedBox(height: 10),
 
-                            // Suchleiste
                             SizedBox(
-                              width: double.infinity, // nimmt volle Breite der Karte
+                              width: double.infinity,
                               child: TextField(
                                 controller: _controller,
                                 textInputAction: TextInputAction.search,
                                 onSubmitted: (_) => _analyzeHeuristic(),
                                 decoration: const InputDecoration(
-                                  hintText: 'DR. BÜRKLIN-WOLF RIESLING VDP.GUTSWEIN TROCKEN 2021',
+                                  hintText:
+                                  'DR. BÜRKLIN-WOLF RIESLING VDP.GUTSWEIN TROCKEN 2021',
                                 ),
                               ),
                             ),
 
                             const SizedBox(height: 14),
 
-                            // Buttons drunter in Wrap (responsive)
                             Wrap(
                               spacing: 10,
                               runSpacing: 10,
@@ -274,8 +298,10 @@ class _HomePageState extends State<HomePage> {
                                 ),
                                 FilledButton.tonalIcon(
                                   onPressed: _loading ? null : _analyzeWithLLM,
-                                  icon: const Icon(Icons.auto_fix_high_outlined),
-                                  label: const Text('Daten mittels LLM ergänzen'),
+                                  icon:
+                                  const Icon(Icons.auto_fix_high_outlined),
+                                  label: const Text(
+                                      'Daten mittels LLM ergänzen'),
                                 ),
                                 OutlinedButton.icon(
                                   onPressed:
@@ -283,7 +309,8 @@ class _HomePageState extends State<HomePage> {
                                       ? _openViz
                                       : null,
                                   icon: const Icon(Icons.auto_graph_outlined),
-                                  label: const Text('Visualisierung generieren'),
+                                  label: const Text(
+                                      'Visualisierung generieren'),
                                 ),
                               ],
                             ),
@@ -308,6 +335,8 @@ class _HomePageState extends State<HomePage> {
                         notes: _notes,
                         usedLLM: _usedLLM,
                         searchedQuery: _searchedQuery,
+                        criticSummaries: _criticSummaries,
+                        combinedSummary: _combinedSummary,
                       ),
                   ],
                 ),
@@ -329,6 +358,10 @@ class _ResultCard extends StatelessWidget {
   final String? searchedQuery;
   final bool usedLLM;
 
+  // Neu:
+  final List<Map<String, dynamic>> criticSummaries;
+  final String? combinedSummary;
+
   const _ResultCard({
     required this.props,
     required this.sources,
@@ -337,6 +370,8 @@ class _ResultCard extends StatelessWidget {
     required this.notes,
     required this.usedLLM,
     required this.searchedQuery,
+    required this.criticSummaries,
+    required this.combinedSummary,
   });
 
   @override
@@ -431,7 +466,35 @@ class _ResultCard extends StatelessWidget {
               Text((note?.trim().isNotEmpty ?? false) ? note!.trim() : '—'),
 
             const SizedBox(height: 18),
-            Text('Quellen', style: theme.textTheme.titleSmall),
+            Text('Gesamtzusammenfassung', style: theme.textTheme.titleSmall),
+            const SizedBox(height: 6),
+            if (combinedSummary != null &&
+                combinedSummary!.trim().isNotEmpty)
+              Text(
+                combinedSummary!.trim(),
+                style: const TextStyle(height: 1.4),
+              )
+            else
+              const Text('—'),
+
+            const SizedBox(height: 18),
+            Text('Kritiker & Magazine', style: theme.textTheme.titleSmall),
+            const SizedBox(height: 6),
+            if (criticSummaries.isEmpty)
+              const Text('– keine ausgewerteten Kritiker-Summaries –')
+            else
+              Column(
+                children: criticSummaries
+                    .map((c) => _CriticTile(
+                  sourceLabel: (c['source_label'] ?? '').toString(),
+                  summary: (c['summary'] ?? '').toString(),
+                  url: (c['url'] ?? '').toString(),
+                ))
+                    .toList(),
+              ),
+
+            const SizedBox(height: 18),
+            Text('Quellen (Roh-Snippets)', style: theme.textTheme.titleSmall),
             const SizedBox(height: 6),
             if (sources.isEmpty)
               const Text('– keine –'),
@@ -461,9 +524,13 @@ class _ResultCard extends StatelessWidget {
         children: [
           SizedBox(
             width: 160,
-            child: Text(left,
-                style:
-                const TextStyle(fontWeight: FontWeight.w600, height: 1.2)),
+            child: Text(
+              left,
+              style: const TextStyle(
+                fontWeight: FontWeight.w600,
+                height: 1.2,
+              ),
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(child: Text(isEmpty ? '—' : right)),
@@ -476,6 +543,59 @@ class _ResultCard extends StatelessWidget {
   String _list(dynamic v) {
     if (v is List && v.isNotEmpty) return v.join(', ');
     return _fmt(v);
+  }
+}
+
+class _CriticTile extends StatelessWidget {
+  final String sourceLabel;
+  final String summary;
+  final String url;
+
+  const _CriticTile({
+    required this.sourceLabel,
+    required this.summary,
+    required this.url,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (sourceLabel.isNotEmpty)
+            Text(
+              sourceLabel,
+              style: theme.textTheme.titleSmall,
+            ),
+          if (summary.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              summary,
+              style: TextStyle(color: Colors.black.withOpacity(0.85)),
+            ),
+          ],
+          if (url.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            SelectableText(
+              url,
+              style: const TextStyle(
+                color: Colors.blueAccent,
+                decoration: TextDecoration.underline,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 }
 
@@ -507,7 +627,10 @@ class _SourceTile extends StatelessWidget {
             Text(title, style: theme.textTheme.titleSmall),
           if (snippet.isNotEmpty) ...[
             const SizedBox(height: 4),
-            Text(snippet, style: TextStyle(color: Colors.black.withOpacity(0.75))),
+            Text(
+              snippet,
+              style: TextStyle(color: Colors.black.withOpacity(0.75)),
+            ),
           ],
           if (url.isNotEmpty) ...[
             const SizedBox(height: 4),

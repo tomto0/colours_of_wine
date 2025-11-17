@@ -1,21 +1,29 @@
-from typing import List, Optional, Tuple, Any, Dict
+from __future__ import annotations
+
+from typing import List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
 
 class AnalyzeRequest(BaseModel):
+    """
+    Input payload für /analyze.
+    """
     wine_name: str = Field(..., description='z. B. "Riesling Bürklin-Wolf 2021"')
     use_llm: Optional[bool] = Field(
         default=None,
-        description="Aktiviere LLM-Anreicherung (nur fehlende Felder)",
+        description="Aktiviere LLM-Anreicherung (Summaries & strukturierte Daten)",
     )
 
 
 class SourceItem(BaseModel):
+    """
+    Ein einzelnes Suchergebnis (Snippet) aus dem Web.
+    """
     title: Optional[str] = None
     url: Optional[str] = None
     snippet: Optional[str] = None
-    score: Optional[float] = None
+    score: Optional[float] = None  # optional, falls du später scoringen willst
 
 
 class ColorInfo(BaseModel):
@@ -25,22 +33,29 @@ class ColorInfo(BaseModel):
 
 
 class WineProps(BaseModel):
+    """
+    Strukturierte Weineigenschaften.
+    """
     vintage: Optional[int] = None
-    wine_type: Optional[str] = None
+    wine_type: Optional[str] = None  # "red", "white", "rosé", "sparkling"
     variety: Optional[str] = None
     grapes: List[str] = []
     country: Optional[str] = None
     region: Optional[str] = None
     appellation: Optional[str] = None
     producer: Optional[str] = None
-    style: Optional[str] = None
-    sweetness: Optional[str] = None
-    alcohol: Optional[float] = None
+    style: Optional[str] = None  # "still", "sparkling", "fortified"
+    sweetness: Optional[str] = None  # "dry", "off-dry", ...
+    alcohol: Optional[float] = None  # ABV in %
     oak: Optional[bool] = None
     tasting_notes: List[str] = []
 
 
 class VizProfile(BaseModel):
+    """
+    Visualisierungsprofil für das Frontend.
+    Alle numerischen Felder werden mit clamp() auf [0,1] begrenzt.
+    """
     base_color_hex: Optional[str] = None
     acidity: float = 0.4
     body: float = 0.4
@@ -68,7 +83,20 @@ class VizProfile(BaseModel):
         self.ripe_aromas = c(self.ripe_aromas)
 
 
+class CriticSummary(BaseModel):
+    """
+    Zusammenfassung einer bestimmten Quelle (Winzer / Kritiker / Magazin).
+    """
+    source_id: str
+    source_label: str
+    url: Optional[str] = None
+    summary: Optional[str] = None
+
+
 class AnalyzeResponse(BaseModel):
+    """
+    Haupt-Response für /analyze.
+    """
     wine_name: str
     searched_query: str
     engine: str
@@ -81,7 +109,11 @@ class AnalyzeResponse(BaseModel):
     reasoning: Optional[str] = None
     viz: Optional[VizProfile] = None
 
-    # Legacy
+    # Kritiker- und Quellen-Summaries
+    critic_summaries: List[CriticSummary] = []
+    combined_summary: Optional[str] = None
+
+    # Legacy / Frontend-kompatibel
     color: Optional[ColorInfo] = None
     hex: Optional[str] = None
     rgb: Optional[List[int]] = None
