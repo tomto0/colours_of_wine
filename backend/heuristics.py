@@ -86,7 +86,7 @@ def extract_props(wine_name: str, sources: List[SourceItem]) -> WineProps:
     # Stil
     props.style = (
         "sparkling"
-        if any(re.search(r"\b" + w + r"\b", blob, re.I) for w in SPARK_WORDS)
+        if any(re.search(r"\b" + re.escape(w) + r"\b", blob, re.I) for w in SPARK_WORDS)
         else "still"
     )
     if re.search(r"\b(port|sherry|madeira)\b", blob, re.I):
@@ -94,7 +94,7 @@ def extract_props(wine_name: str, sources: List[SourceItem]) -> WineProps:
 
     # Süße
     for de, en in SWEET_WORDS:
-        if re.search(r"\b" + de + r"\b", blob, re.I):
+        if re.search(r"\b" + re.escape(de) + r"\b", blob, re.I):
             props.sweetness = en
             break
 
@@ -111,7 +111,7 @@ def extract_props(wine_name: str, sources: List[SourceItem]) -> WineProps:
             pass
 
     # Holz
-    if any(re.search(r"\b" + w + r"\b", blob, re.I) for w in OAK_WORDS):
+    if any(re.search(r"\b" + re.escape(w) + r"\b", blob, re.I) for w in OAK_WORDS):
         props.oak = True
 
     # Tasting Notes
@@ -122,5 +122,5 @@ def extract_props(wine_name: str, sources: List[SourceItem]) -> WineProps:
         re.I,
     )
     if tn:
-        props.tasting_notes = sorted(set([t.lower() for t in tn]))
+        props.tasting_notes = sorted(set(t.lower() for t in tn))
     return props

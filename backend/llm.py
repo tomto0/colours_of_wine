@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional, List, Tuple
 
 from .config import (
     GEMINI_MODEL_ENV,
-    GOOGLE_API_KEY,
+    GEMINI_API_KEY,
     GEMINI_KEY_SET,
     PREFERRED_MODELS,
     PRIORITY_SOURCES,
@@ -24,7 +24,7 @@ try:
 
     _genai = genai
     if GEMINI_KEY_SET:
-        _genai.configure(api_key=GOOGLE_API_KEY)
+        _genai.configure(api_key=GEMINI_API_KEY)
 except Exception:
     _genai = None
 

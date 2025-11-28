@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import os
-from typing import List, Tuple, Dict, Any
+from typing import List, Dict, Any, Tuple
 
 # ======================= Gemini / Google Generative AI =======================
 
 GEMINI_MODEL_ENV = os.getenv("GEMINI_MODEL", "").strip()
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "").strip()
-GEMINI_KEY_SET = bool(GOOGLE_API_KEY)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_KEY_SET = bool(GEMINI_API_KEY)
 
 # Bevorzugte Modelle, falls GEMINI_MODEL nicht explizit gesetzt ist
 PREFERRED_MODELS: List[str] = [
@@ -15,6 +15,14 @@ PREFERRED_MODELS: List[str] = [
     "gemini-1.5-pro-latest",
     "gemini-1.5-flash-8b-latest",
 ]
+
+# ======================= Google Custom Search ===============================
+
+GOOGLE_SEARCH_API_KEY = os.getenv("GOOGLE_SEARCH_API_KEY", "").strip()
+GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID", "").strip()
+
+# Ist die Websuche korrekt konfigur iert?
+SEARCH_ENABLED: bool = bool(GOOGLE_SEARCH_API_KEY and GOOGLE_CSE_ID)
 
 # ======================= DuckDuckGo / Suche =================================
 
@@ -24,14 +32,19 @@ DDG_SAFE = os.getenv("DDG_SAFE", "moderate")
 
 COLOR_TABLE: Dict[str, str] = {
     "pale straw": "#F6F2AF",
+    "straw": "#F5EB7C",
+    "gold": "#E6C75B",
+    "amber": "#D48A3A",
     "rosé": "#F4A6B0",
+    "salmon": "#F2A29B",
     "ruby": "#8B1A1A",
     "garnet": "#7B2D26",
+    "tawny": "#A0522D",
 }
 
 # ======================= Heuristik-Konstanten ===============================
 
-COUNTRIES = [
+COUNTRIES: List[str] = [
     "Austria",
     "Germany",
     "France",
@@ -65,32 +78,64 @@ VARIETIES: List[Tuple[str, str]] = [
     ("St. Laurent", "red"),
 ]
 
-SWEET_WORDS = [
+WINE_TYPES: List[str] = ["red", "white", "rosé", "sparkling"]
+
+# Grundlegende Süße-Level (hauptsächlich deutschsprachig)
+SWEETNESS_LEVELS: List[str] = [
+    "trocken",
+    "feinherb",
+    "halbtrocken",
+    "lieblich",
+    "süß",
+]
+
+# Schlüsselwörter für Holz / Fassausbau
+OAK_KEYWORDS: List[str] = [
+    "barrique",
+    "oak",
+    "Holzfass",
+    "Holz",
+    "Eiche",
+    "Eichenfass",
+]
+
+# Schlüsselwörter für Schaumwein
+SPARKLING_KEYWORDS: List[str] = [
+    "Sekt",
+    "Champagner",
+    "Crémant",
+    "Frizzante",
+    "Spumante",
+    "Prosecco",
+    "sparkling",
+    "sparkling wine",
+    "bubbles",
+    "perlage",
+]
+
+# ======================= Backwards-Compat für heuristics.py =================
+# heuristics.py importiert: SWEET_WORDS, SPARK_WORDS, OAK_WORDS
+# SWEET_WORDS ist (Suchwort im Text, normalisierte Ausgabe)
+
+SWEET_WORDS: List[Tuple[str, str]] = [
     ("trocken", "dry"),
-    ("dry", "dry"),
-    ("halbtrocken", "off-dry"),
-    ("off-dry", "off-dry"),
-    ("lieblich", "medium-sweet"),
-    ("semi-sweet", "medium-sweet"),
+    ("feinherb", "off-dry"),
+    ("halbtrocken", "semi-dry"),
+    ("lieblich", "semi-sweet"),
     ("süß", "sweet"),
+
+    ("dry", "dry"),
+    ("off-dry", "off-dry"),
+    ("semi-dry", "semi-dry"),
+    ("semi sweet", "semi-sweet"),
     ("sweet", "sweet"),
 ]
 
-SPARK_WORDS = [
-    "sparkling",
-    "sekt",
-    "champagne",
-    "cava",
-    "prosecco",
-    "spumante",
-    "frizzante",
-]
+SPARK_WORDS: List[str] = SPARKLING_KEYWORDS
+OAK_WORDS: List[str] = OAK_KEYWORDS
 
-OAK_WORDS = ["oak", "barrique", "oak-aged", "holzfass", "eiche", "eichenfass"]
+# ======================= Priorisierte Quellen ===============================
 
-# ======================= Quellen-Priorität ==================================
-
-# Reihenfolge nach deiner Vorgabe:
 PRIORITY_SOURCES: List[Dict[str, Any]] = [
     {"id": "producer", "label": "Weingut / Erzeuger", "domains": [], "type": "producer"},
     {"id": "vinum", "label": "Vinum", "domains": ["vinum.eu", "vinum.de"]},
