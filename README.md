@@ -22,7 +22,7 @@
     - `export GEMINI_API_KEY="DEIN_GEMINI_KEY"`
     - `export GOOGLE_SEARCH_API_KEY="DEIN_GOOGLE_SEARCH_KEY"`
     - `export GOOGLE_CSE_ID="DEINE_CSE_ID"`
-6. `pip install fastapi uvicorn[standard] python-dotenv pydantic pyyaml`
+6. `pip install fastapi uvicorn[standard] python-dotenv pydantic pyyaml google-generativeai`
 
 - Um Backend zu starten, führe folgendes im Terminal aus:
 - 1. `source backend/.venv/bin/activate` # damit die virtuelle Umgebung aktiviert wird
