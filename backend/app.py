@@ -192,11 +192,13 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     # 5) Ergebnis im Cache speichern (nur bei LLM-Nutzung)
     # ---------------------------------------------------------
     if used_llm:
+        # props_final zu dict konvertieren (kann WineProps Pydantic-Model sein)
+        props_dict = props_final.model_dump() if hasattr(props_final, 'model_dump') else props_final
         save_to_cache(
             wine_name=wine,
             viz_profile=viz_profile.model_dump() if viz_profile else None,
             combined_summary=combined_summary,
-            props=props_final,
+            props=props_dict,
             hex_color=color.hex,
         )
         notes.append("✓ Ergebnis im Cache gespeichert")
