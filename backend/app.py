@@ -23,6 +23,7 @@ from .llm import (
 )
 from .search import google_search_raw
 from .imagegen import generate_wine_png_bytes
+from .cache import get_cached_wine, save_to_cache, get_cache_stats
 
 app = FastAPI(title="Colours of Wine API", version="2.2.0")
 
@@ -38,6 +39,7 @@ app.add_middleware(
 @app.get("/health")
 def health():
     model, chosen = build_gemini()
+    stats = get_cache_stats()
     return {
         "status": "ok",
         "llm_available": bool(model),
@@ -45,7 +47,14 @@ def health():
         "api_key_set": GEMINI_KEY_SET,
         "search_mode": "google_custom_search+gemini",
         "search_enabled": SEARCH_ENABLED,
+        "cache_entries": stats["total_entries"],
     }
+
+
+@app.get("/cache/stats")
+def cache_stats():
+    """Gibt Statistiken über den Wine-Cache zurück."""
+    return get_cache_stats()
 
 
 @app.post("/analyze", response_model=AnalyzeResponse)
@@ -54,14 +63,55 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     Haupt-Logik:
 
       1. Name normalisieren.
-      2. Google Custom Search → Roh-Snippets (falls konfiguriert).
-      3. Heuristische Props aus Name + Snippets.
-      4. Optional: LLM-Pipeline (Summaries + Props + Viz) und Merge.
-      5. Farbe als Fallback für Viz.
+      2. **Cache prüfen** - bei Treffer direkt zurückgeben.
+      3. Google Custom Search → Roh-Snippets (falls konfiguriert).
+      4. Heuristische Props aus Name + Snippets.
+      5. Optional: LLM-Pipeline (Summaries + Props + Viz) und Merge.
+      6. Farbe als Fallback für Viz.
+      7. **Ergebnis im Cache speichern.**
     """
     wine = (req.wine_name or "").strip()
     if not wine:
         raise HTTPException(status_code=400, detail="`wine_name` darf nicht leer sein.")
+
+    notes: List[str] = []
+
+    # ---------------------------------------------------------
+    # 0) Cache prüfen - bei LLM-Anfrage und Treffer: sofort zurück
+    # ---------------------------------------------------------
+    cached = get_cached_wine(wine)
+    if cached and req.use_llm:
+        # Wein wurde schon mal mit LLM analysiert → Cache nutzen
+        notes.append("✓ Ergebnis aus Cache geladen (bereits analysiert)")
+        
+        # VizProfile aus gecachten Daten rekonstruieren
+        cached_viz = None
+        if cached.get("viz"):
+            cached_viz = VizProfile(**cached["viz"])
+        
+        # Farbe als Fallback
+        color = pick_color_heuristic(wine)
+        hex_color = cached.get("hex") or color.hex
+        
+        return AnalyzeResponse(
+            wine_name=wine,
+            searched_query=wine,
+            engine="cache",
+            tried_queries=[],
+            found=True,
+            props=cached.get("props", {}),
+            sources=[],  # Quellen nicht gecacht
+            notes=notes,
+            used_llm=True,  # War mal LLM
+            reasoning=f"Aus Cache geladen (gespeichert: {cached.get('created_at', 'unbekannt')})",
+            viz=cached_viz,
+            critic_summaries=[],  # Nicht gecacht
+            combined_summary=cached.get("combined_summary"),
+            color=color,
+            hex=hex_color,
+            rgb=[*color.rgb],
+            note="Gecachte LLM-Analyse",
+        )
 
     notes: List[str] = []
 
@@ -135,8 +185,21 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
         else (notes[0] if notes else "Heuristik/Regeln aus Namen + Google-Snippets")
     )
 
-    # „Gefunden“, wenn entweder Snippets oder LLM-Ergebnisse da sind
+    # „Gefunden", wenn entweder Snippets oder LLM-Ergebnisse da sind
     found = bool(sources) or used_llm
+
+    # ---------------------------------------------------------
+    # 5) Ergebnis im Cache speichern (nur bei LLM-Nutzung)
+    # ---------------------------------------------------------
+    if used_llm:
+        save_to_cache(
+            wine_name=wine,
+            viz_profile=viz_profile.model_dump() if viz_profile else None,
+            combined_summary=combined_summary,
+            props=props_final,
+            hex_color=color.hex,
+        )
+        notes.append("✓ Ergebnis im Cache gespeichert")
 
     return AnalyzeResponse(
         wine_name=wine,

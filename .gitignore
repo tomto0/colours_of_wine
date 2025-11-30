@@ -48,6 +48,7 @@ backend/.venv/
 backend/.env
 backend/__pycache__/
 backend/generated_bsp/
+backend/wine_cache.db
 **/__pycache__/
 *.pyc
 
