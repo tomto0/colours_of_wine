@@ -45,9 +45,15 @@ app.*.map.json
 /android/app/release
 # Python
 backend/.venv/
+backend/.env
 backend/__pycache__/
+backend/generated_bsp/
 **/__pycache__/
 *.pyc
+
+# Beispieldaten / Testdaten
+bsp/
+generated_wine_white.png
 
 # Flutter/Dart
 .dart_tool/

@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import List, Dict, Any, Tuple
+
+# .env Datei laden
+from dotenv import load_dotenv
+_env_path = Path(__file__).parent / ".env"
+load_dotenv(_env_path)
 
 # ======================= Gemini / Google Generative AI =======================
 

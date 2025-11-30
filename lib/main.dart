@@ -176,7 +176,12 @@ class _HomePageState extends State<HomePage> {
   void _openViz() {
     WineProfile profile;
     if (_viz != null) {
-      profile = WineProfile.fromLLMMap(_viz!, fallbackHex: _hexForViz);
+      // Übergebe sowohl das viz-Objekt als auch die combined_summary
+      profile = WineProfile.fromLLMMap(
+        _viz!, 
+        fallbackHex: _hexForViz,
+        summary: _combinedSummary,
+      );
     } else if (_hexForViz != null) {
       profile = WineProfile.fromBaseColor(_colorFromHex(_hexForViz!));
     } else {
@@ -216,7 +221,7 @@ class _HomePageState extends State<HomePage> {
     final double maxWidth = 1200;
 
     return Scaffold(
-      backgroundColor: theme.colorScheme.background,
+      backgroundColor: theme.colorScheme.surface,
       body: SafeArea(
         child: Stack(
           children: [
@@ -229,7 +234,7 @@ class _HomePageState extends State<HomePage> {
                       end: Alignment.bottomRight,
                       colors: [
                         Colors.white.withOpacity(0.6),
-                        theme.colorScheme.background,
+                        theme.colorScheme.surface,
                         Colors.white.withOpacity(0.5),
                       ],
                     ),

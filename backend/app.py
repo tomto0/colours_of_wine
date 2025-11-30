@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from typing import List
+import io
+from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+from pydantic import BaseModel
 
 from .config import GEMINI_KEY_SET, SEARCH_ENABLED
 from .models import (
@@ -19,6 +22,7 @@ from .llm import (
     _merge_props_non_destructive,
 )
 from .search import google_search_raw
+from .imagegen import generate_wine_png_bytes
 
 app = FastAPI(title="Colours of Wine API", version="2.2.0")
 
@@ -153,3 +157,63 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
         rgb=[*color.rgb],
         note=legacy_note,
     )
+
+
+# ---------------------------------------------------------
+# Neuer Endpoint: Visualisierung als PNG generieren
+# ---------------------------------------------------------
+
+class VizRequest(BaseModel):
+    """Eingabe für /generate-viz - alle Werte 0..1"""
+    base_color_hex: str = "#F6F2AF"
+    acidity: float = 0.5
+    body: float = 0.5
+    depth: float = 0.5
+    oak_intensity: float = 0.0
+    mineral_intensity: float = 0.3
+    herbal_intensity: float = 0.0
+    spice_intensity: float = 0.0
+    fruit_citrus: float = 0.0
+    fruit_stone: float = 0.0
+    fruit_tropical: float = 0.0
+    fruit_red: float = 0.0
+    fruit_dark: float = 0.0
+    effervescence: float = 0.0
+    wine_type: str = "auto"  # "red", "white", "rose", "auto"
+    size: int = 512
+    summary: Optional[str] = None  # Die kombinierte Zusammenfassung des Weins
+
+
+@app.post("/generate-viz")
+async def generate_viz(req: VizRequest) -> Response:
+    """
+    Generiert ein PNG-Bild der Weinvisualisierung.
+    Gibt das Bild direkt als image/png zurück.
+    
+    Der 'summary' Parameter enthält die kombinierte Zusammenfassung des Weins,
+    die für erweiterte Visualisierungen oder Logging verwendet werden kann.
+    """
+    viz_dict = {
+        "base_color_hex": req.base_color_hex,
+        "acidity": req.acidity,
+        "body": req.body,
+        "depth": req.depth,
+        "oak_intensity": req.oak_intensity,
+        "mineral_intensity": req.mineral_intensity,
+        "herbal_intensity": req.herbal_intensity,
+        "spice_intensity": req.spice_intensity,
+        "fruit_citrus": req.fruit_citrus,
+        "fruit_stone": req.fruit_stone,
+        "fruit_tropical": req.fruit_tropical,
+        "fruit_red": req.fruit_red,
+        "fruit_dark": req.fruit_dark,
+        "effervescence": req.effervescence,
+        "wine_type": req.wine_type,
+        "summary": req.summary,  # Für zukünftige Nutzung in imagegen
+    }
+    
+    try:
+        png_bytes = generate_wine_png_bytes(viz_dict, size=req.size)
+        return Response(content=png_bytes, media_type="image/png")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Bildgenerierung fehlgeschlagen: {e}")

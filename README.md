@@ -22,7 +22,7 @@
     - `export GEMINI_API_KEY="DEIN_GEMINI_KEY"`
     - `export GOOGLE_SEARCH_API_KEY="DEIN_GOOGLE_SEARCH_KEY"`
     - `export GOOGLE_CSE_ID="DEINE_CSE_ID"`
-6. `pip install fastapi uvicorn[standard] python-dotenv pydantic pyyaml google-generativeai`
+6. `pip install fastapi uvicorn[standard] python-dotenv pydantic pyyaml httpx google-generativeai pillow numpy`
 
 - Um Backend zu starten, führe folgendes im Terminal aus:
 - 1. `source backend/.venv/bin/activate` # damit die virtuelle Umgebung aktiviert wird
@@ -30,7 +30,7 @@
 - health check: curl http://127.0.0.1:8000/health
 
 ## 4) Frontend Setup
-- Frontend kann in der IDE mittels Run-Button gestartet werden oder im Terminal, in der Run-Konfiguration von main.dart muss 
+- Frontend kann in der IDE mittels Run-Button gestartet werden oder im Terminal, in der Run-Konfiguration von main.dart muss
   unter "Additional run args" die backend URL angegeben werden: `--dart-define=BACKEND_URL=http://127.0.0.1:8000/analyze`
 
 ## 5) Nützliche Hinweise

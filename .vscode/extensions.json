@@ -1,0 +1,10 @@
+{
+  "recommendations": [
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+    "dart-code.dart-code",
+    "dart-code.flutter",
+    "github.copilot",
+    "github.copilot-chat"
+  ]
+}
