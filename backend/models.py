@@ -87,6 +87,9 @@ class VizProfile(BaseModel):
     effervescence: float = 0.0       # 0 = still, 0.3-0.5 = Frizzante, 0.7-1.0 = Sekt
     bubbles: bool = False            # True für Schaumwein
 
+    # Restzucker (wichtig für Geschmack!)
+    residual_sugar: float = 0.0      # Restzucker in g/L (0-500+)
+
     # Legacy-Felder (für Rückwärtskompatibilität)
     oak_style: Optional[str] = None
     bubbles_intensity: float = 0.0

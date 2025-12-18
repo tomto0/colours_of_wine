@@ -102,6 +102,26 @@ def profile_from_text(txt: str) -> Dict:
 
     # Süße: Hinweise auf restsüß, lieblich, honig, edelsüß etc.
     sweetness = _score(t, ["lieblich", "süß", "süss", "edelsüß", "spätlese", "beerenauslese", "eiswein", "honig"])
+    
+    # Restzucker in g/L schätzen basierend auf Stilbezeichnungen
+    residual_sugar = 0.0
+    if any(k in t for k in ["trockenbeerenauslese", "tba"]):
+        residual_sugar = 300.0  # Sehr edelsüß
+    elif any(k in t for k in ["beerenauslese", "eiswein"]):
+        residual_sugar = 180.0  # Edelsüß
+    elif any(k in t for k in ["auslese"]):
+        residual_sugar = 80.0  # Süß
+    elif any(k in t for k in ["spätlese"]):
+        residual_sugar = 40.0  # Medium-süß (kann auch trocken sein)
+    elif any(k in t for k in ["lieblich", "feinherb", "restsüß", "restzucker"]):
+        residual_sugar = 25.0  # Halbtrocken bis lieblich
+    elif any(k in t for k in ["halbtrocken", "off-dry"]):
+        residual_sugar = 12.0  # Halbtrocken
+    elif any(k in t for k in ["trocken", "dry", "brut"]):
+        residual_sugar = 4.0  # Trocken
+    else:
+        # Default: leicht trocken
+        residual_sugar = 6.0
 
     # Holz / Ausbau
     oak_intensity = 0.0
@@ -173,6 +193,7 @@ def profile_from_text(txt: str) -> Dict:
         "fruit_tropical": fruit_tropical,
         "fruit_red": fruit_red,
         "fruit_dark": fruit_dark,
+        "residual_sugar": residual_sugar,
     }
 
 

@@ -1,6 +1,6 @@
 from pathlib import Path
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image, ImageFilter, ImageDraw, ImageFont
 
 
 def hex_to_rgb(hex_str: str) -> tuple[int, int, int]:
@@ -9,6 +9,103 @@ def hex_to_rgb(hex_str: str) -> tuple[int, int, int]:
         h = "FF" + h
     value = int(h, 16)
     return ((value >> 16) & 255, (value >> 8) & 255, value & 255)
+
+
+def draw_residual_sugar_bar(img: Image.Image, residual_sugar: float, bar_width: int = None) -> Image.Image:
+    """
+    Zeichnet einen Restzucker-Balken am rechten Rand des Bildes.
+    
+    Args:
+        img: Das Eingabebild (PIL Image)
+        residual_sugar: Restzucker in g/L (typisch 0-500, kann aber höher sein)
+        bar_width: Breite des Balkens (default: 5% der Bildbreite)
+    
+    Returns:
+        Neues Bild mit Balken
+    """
+    if residual_sugar is None or residual_sugar < 0:
+        return img
+    
+    w, h = img.size
+    if bar_width is None:
+        bar_width = max(int(w * 0.05), 30)  # 5% der Breite, mindestens 30px
+    
+    # Neues breiteres Bild erstellen
+    new_w = w + bar_width
+    new_img = Image.new("RGB", (new_w, h), (252, 252, 254))  # Hintergrundfarbe
+    new_img.paste(img, (0, 0))
+    
+    draw = ImageDraw.Draw(new_img)
+    
+    # Balkenhöhe berechnen (logarithmische Skala für bessere Verteilung)
+    # Skala: 0g → 0%, 9g → ~10%, 50g → ~50%, 500g → 100%
+    # Formel: log-basiert mit Minimum bei 1g
+    if residual_sugar <= 0:
+        bar_height_ratio = 0.0
+    else:
+        # Log-Skala: log(1) = 0, log(500) ≈ 2.7
+        import math
+        max_sugar = 500.0  # Obergrenze für 100%
+        min_sugar = 1.0    # Untergrenze
+        clamped = max(min_sugar, min(residual_sugar, max_sugar))
+        bar_height_ratio = math.log10(clamped) / math.log10(max_sugar)
+        bar_height_ratio = min(1.0, max(0.0, bar_height_ratio))
+    
+    # Balken von unten nach oben
+    bar_height = int(h * bar_height_ratio)
+    bar_x1 = w
+    bar_x2 = new_w
+    bar_y1 = h - bar_height  # Oberkante
+    bar_y2 = h               # Unterkante
+    
+    # Pinke/Magenta Farbe (wie im Beispielbild)
+    bar_color = (240, 62, 107)  # Pink/Magenta
+    
+    # Balken zeichnen
+    if bar_height > 0:
+        draw.rectangle([bar_x1, bar_y1, bar_x2, bar_y2], fill=bar_color)
+    
+    # Hintergrund über dem Balken (grau)
+    if bar_y1 > 0:
+        gray_color = (200, 200, 200)
+        draw.rectangle([bar_x1, 0, bar_x2, bar_y1], fill=gray_color)
+    
+    # Text mit Restzucker-Wert (vertikal, von unten nach oben)
+    # Wert als ganze Zahl anzeigen
+    sugar_text = f"{int(residual_sugar)} gr RZ"
+    
+    # Font laden (versuche System-Font, sonst Default)
+    font_size = max(int(bar_width * 0.5), 12)
+    try:
+        font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", font_size)
+    except:
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size)
+        except:
+            font = ImageFont.load_default()
+    
+    # Text vertikal zeichnen (rotiert)
+    # Erstelle temporäres Bild für rotierten Text
+    text_bbox = draw.textbbox((0, 0), sugar_text, font=font)
+    text_w = text_bbox[2] - text_bbox[0]
+    text_h = text_bbox[3] - text_bbox[1]
+    
+    text_img = Image.new("RGBA", (text_w + 10, text_h + 10), (0, 0, 0, 0))
+    text_draw = ImageDraw.Draw(text_img)
+    text_draw.text((5, 5), sugar_text, font=font, fill=(255, 255, 255, 255))
+    
+    # 90° gegen Uhrzeigersinn drehen (Text von unten nach oben lesbar)
+    text_img = text_img.rotate(90, expand=True)
+    
+    # Text in der Mitte des Balkens positionieren
+    text_x = w + (bar_width - text_img.width) // 2
+    text_y = h - bar_height + (bar_height - text_img.height) // 2
+    
+    # Nur zeichnen wenn genug Platz
+    if bar_height > text_img.height + 10:
+        new_img.paste(text_img, (text_x, max(0, text_y)), text_img)
+    
+    return new_img
 
 
 def generate_wine_png(
@@ -66,6 +163,9 @@ def generate_wine_png(
     
     # Spritzigkeit für Layer 3
     effervescence = _f("effervescence", 0.0)
+    
+    # Restzucker (g/L) für den Balken am rechten Rand
+    residual_sugar = _f("residual_sugar", 0.0)
     
     # Weintyp aus Profil (optional)
     wine_type = viz.get("wine_type", "auto")  # "red", "white", "rose", "auto"
@@ -295,6 +395,11 @@ def generate_wine_png(
 
     # Speichern
     pil = Image.fromarray(np.clip(img, 0, 255).astype(np.uint8), mode="RGB")
+    
+    # Restzucker-Balken hinzufügen (rechter Rand)
+    if residual_sugar > 0:
+        pil = draw_residual_sugar_bar(pil, residual_sugar)
+    
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     pil.save(out_path, format="PNG")
     print(f"saved {out_path}")
@@ -349,6 +454,7 @@ def generate_wine_png_bytes(
     body = _f("body", 0.5)
     depth = _f("depth", 0.5)
     effervescence = _f("effervescence", 0.0)
+    residual_sugar = _f("residual_sugar", 0.0)
     wine_type = viz.get("wine_type", "auto")
 
     # LAYER 1
@@ -525,6 +631,11 @@ def generate_wine_png_bytes(
 
     # In Bytes speichern
     pil = Image.fromarray(np.clip(img, 0, 255).astype(np.uint8), mode="RGB")
+    
+    # Restzucker-Balken hinzufügen (rechter Rand)
+    if residual_sugar > 0:
+        pil = draw_residual_sugar_bar(pil, residual_sugar)
+    
     buffer = io.BytesIO()
     pil.save(buffer, format="PNG")
     return buffer.getvalue()

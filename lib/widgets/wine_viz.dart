@@ -23,6 +23,7 @@ class WineProfile {
   final double fruitRed;
   final double fruitDark;
   final double effervescence;
+  final double residualSugar; // Restzucker in g/L
   final String wineType; // "red", "white", "rose", "auto"
   
   // Die Zusammenfassung für die Visualisierung
@@ -43,6 +44,7 @@ class WineProfile {
     this.fruitRed = 0.0,
     this.fruitDark = 0.0,
     this.effervescence = 0.0,
+    this.residualSugar = 0.0,
     this.wineType = "auto",
     this.summary,
   });
@@ -105,6 +107,13 @@ class WineProfile {
       return d;
     }
     
+    // Für Werte die nicht 0-1 begrenzt sind (z.B. residual_sugar in g/L)
+    double _fRaw(String k, double d) {
+      final v = m[k];
+      if (v is num) return v.toDouble();
+      return d;
+    }
+    
     // Weintyp bestimmen
     String wineType = (m['wine_type'] ?? 'auto').toString();
     if (wineType.isEmpty) wineType = 'auto';
@@ -130,6 +139,7 @@ class WineProfile {
       fruitRed: _f('fruit_red', 0.0),
       fruitDark: _f('fruit_dark', 0.0),
       effervescence: effervescence,
+      residualSugar: _fRaw('residual_sugar', 0.0), // g/L, nicht 0-1!
       wineType: wineType,
       summary: summary,
     );
@@ -194,6 +204,7 @@ class _WineVizState extends State<WineViz> {
         'fruit_red': p.fruitRed,
         'fruit_dark': p.fruitDark,
         'effervescence': p.effervescence,
+        'residual_sugar': p.residualSugar,
         'wine_type': p.wineType,
         'size': 512,
       };

@@ -244,6 +244,7 @@ class VizRequest(BaseModel):
     fruit_red: float = 0.0
     fruit_dark: float = 0.0
     effervescence: float = 0.0
+    residual_sugar: float = 0.0  # Restzucker in g/L
     wine_type: str = "auto"  # "red", "white", "rose", "auto"
     size: int = 512
     summary: Optional[str] = None  # Die kombinierte Zusammenfassung des Weins
@@ -273,6 +274,7 @@ async def generate_viz(req: VizRequest) -> Response:
         "fruit_red": req.fruit_red,
         "fruit_dark": req.fruit_dark,
         "effervescence": req.effervescence,
+        "residual_sugar": req.residual_sugar,
         "wine_type": req.wine_type,
         "summary": req.summary,  # Für zukünftige Nutzung in imagegen
     }
